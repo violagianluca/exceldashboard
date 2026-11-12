@@ -102,12 +102,43 @@
                 </div>
             </section>
 
+            <!-- Box 1B: Filtri Pre-Analisi -->
+            <section id="pre-filters-section" class="hidden bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div class="p-4 border-b border-slate-100 bg-slate-50/60 flex justify-between items-center">
+                    <div class="flex items-center space-x-2">
+                        <i data-lucide="filter" class="w-4 h-4 text-amber-600"></i>
+                        <h2 class="font-semibold text-slate-800 text-xs uppercase tracking-wider">2. Filtri Pre-Analisi</h2>
+                    </div>
+                    <span id="filtered-rows-badge" class="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800">
+                        Tutte le righe
+                    </span>
+                </div>
+
+                <div class="p-4 space-y-3">
+                    <p class="text-[11px] text-slate-500 leading-tight">
+                        Limita l'analisi AI e i prospetti a un sottoinsieme specifico (es. solo un Comune, una Classe o importi sopra una soglia).
+                    </p>
+
+                    <div id="pre-filters-list" class="space-y-2"></div>
+
+                    <div class="flex items-center justify-between gap-2 pt-1">
+                        <button id="btn-add-prefilter" type="button" class="inline-flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg text-xs font-semibold transition-all">
+                            <i data-lucide="plus-circle" class="w-3.5 h-3.5 text-amber-600"></i>
+                            <span>Aggiungi Filtro</span>
+                        </button>
+                        <button id="btn-reset-prefilters" type="button" class="hidden text-xs text-slate-500 hover:text-rose-600 font-medium transition-colors">
+                            Rimuovi tutti
+                        </button>
+                    </div>
+                </div>
+            </section>
+
             <!-- Box 2: Indicatori e Criteri di Analisi AI -->
             <section class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                 <div class="p-4 border-b border-slate-100 bg-slate-50/60 flex justify-between items-center">
                     <div class="flex items-center space-x-2">
                         <i data-lucide="sliders-horizontal" class="w-4 h-4 text-indigo-600"></i>
-                        <h2 class="font-semibold text-slate-800 text-xs uppercase tracking-wider">2. Indicatori &amp; Prospetti AI</h2>
+                        <h2 class="font-semibold text-slate-800 text-xs uppercase tracking-wider">3. Indicatori &amp; Prospetti AI</h2>
                     </div>
                     <button id="btn-suggest-indicators" type="button" class="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-[11px] font-semibold transition-all" title="L'AI esamina le colonne del foglio e propone gli indicatori più utili">
                         <i data-lucide="wand-sparkles" class="w-3 h-3"></i>
@@ -312,6 +343,7 @@
         // Stato Applicazione
         let loadedWorkbooks = []; // [{ id, fileName, sheets: { sheetName: { headers, rows } }, activeSheet }]
         let activeDatasetId = null;
+        let activePreFilters = []; // [{ id, column, operator, value }]
         let lastProspectusData = null; // { title, columns, rows, summaryText, anomalies, chartLabels, chartValues, chartLabelName }
         let chartInstance = null;
 
@@ -322,6 +354,11 @@
         const datasetsCountBadge = document.getElementById('datasets-count-badge');
         const sheetSelectorBox = document.getElementById('sheet-selector-box');
         const sheetSelect = document.getElementById('sheet-select');
+        const preFiltersSection = document.getElementById('pre-filters-section');
+        const filteredRowsBadge = document.getElementById('filtered-rows-badge');
+        const preFiltersList = document.getElementById('pre-filters-list');
+        const btnAddPrefilter = document.getElementById('btn-add-prefilter');
+        const btnResetPrefilters = document.getElementById('btn-reset-prefilters');
         const detectedColumnsBox = document.getElementById('detected-columns-box');
         const groupBySelect = document.getElementById('group-by-select');
         const metricColSelect = document.getElementById('metric-col-select');
@@ -383,6 +420,8 @@
             if (btnLoadDemo) btnLoadDemo.addEventListener('click', loadDemoDataset);
             const btnEmptyDemo = document.getElementById('btn-empty-demo');
             if (btnEmptyDemo) btnEmptyDemo.addEventListener('click', loadDemoDataset);
+            btnAddPrefilter.addEventListener('click', addPreFilterRule);
+            btnResetPrefilters.addEventListener('click', resetAllPreFilters);
             btnSuggestIndicators.addEventListener('click', suggestIndicatorsWithAI);
             btnRunAnalysis.addEventListener('click', runProspectusAnalysis);
             btnExportProspectusXlsx.addEventListener('click', exportProspectusToExcel);
@@ -448,187 +487,158 @@
             return ds.sheets[ds.activeSheet] || null;
         }
 
-        function parseSheetMatrix(matrix) {
-            if (!Array.isArray(matrix) || matrix.length < 2) return null;
+        function getFilteredRows() {
+            const sData = getActiveSheetData();
+            if (!sData) return [];
+            const validFilters = activePreFilters.filter(f => f.column && String(f.value ?? '').trim() !== '');
+            if (validFilters.length === 0) return sData.rows;
 
-            let headerRowIdx = -1;
-            let bestScore = -1;
-            for (let r = 0; r < Math.min(matrix.length, 20); r++) {
-                const row = matrix[r];
-                if (!Array.isArray(row)) continue;
-                const nonEmpty = row.map(c => String(c ?? '').trim()).filter(Boolean);
-                const hasNext = r + 1 < matrix.length && Array.isArray(matrix[r + 1]) && matrix[r + 1].some(c => String(c ?? '').trim() !== '');
-                if (nonEmpty.length > 0 && hasNext) {
-                    const textCount = nonEmpty.filter(v => isNaN(Number(v.replace(/[.,€%\s-]/g, '')))).length;
-                    const score = nonEmpty.length * 2 + textCount;
-                    if (score > bestScore) {
-                        bestScore = score;
-                        headerRowIdx = r;
+            return sData.rows.filter(row => {
+                return validFilters.every(f => {
+                    const cellRaw = String(row[f.column] ?? '').trim();
+                    const filterVal = String(f.value ?? '').trim();
+
+                    if (f.operator === 'eq') {
+                        return cellRaw.toLowerCase() === filterVal.toLowerCase();
                     }
-                }
-            }
-            if (headerRowIdx === -1) return null;
-
-            const rawHeaders = matrix[headerRowIdx];
-            let maxCols = rawHeaders.length;
-            for (let i = headerRowIdx + 1; i < Math.min(matrix.length, headerRowIdx + 25); i++) {
-                if (Array.isArray(matrix[i]) && matrix[i].length > maxCols) maxCols = matrix[i].length;
-            }
-
-            const headers = [];
-            const colIndices = [];
-            const used = new Set();
-
-            for (let c = 0; c < maxCols; c++) {
-                let h = String(rawHeaders[c] ?? '').replace(/\s+/g, ' ').trim();
-                const hasData = matrix.slice(headerRowIdx + 1).some(r => Array.isArray(r) && String(r[c] ?? '').trim() !== '');
-                if (!h && !hasData) continue;
-                if (!h) h = `Colonna ${c + 1}`;
-                let uniqueH = h;
-                let dup = 2;
-                while (used.has(uniqueH.toLowerCase())) uniqueH = `${h} (${dup++})`;
-                used.add(uniqueH.toLowerCase());
-                headers.push(uniqueH);
-                colIndices.push(c);
-            }
-
-            const rows = [];
-            for (let r = headerRowIdx + 1; r < matrix.length; r++) {
-                const arr = matrix[r];
-                if (!Array.isArray(arr)) continue;
-                const obj = {};
-                let nonEmpty = false;
-                colIndices.forEach((cIdx, hIdx) => {
-                    const val = arr[cIdx] !== undefined && arr[cIdx] !== null ? String(arr[cIdx]).trim() : '';
-                    if (val !== '') nonEmpty = true;
-                    obj[headers[hIdx]] = val;
+                    if (f.operator === 'neq') {
+                        return cellRaw.toLowerCase() !== filterVal.toLowerCase();
+                    }
+                    if (f.operator === 'contains') {
+                        return cellRaw.toLowerCase().includes(filterVal.toLowerCase());
+                    }
+                    if (f.operator === 'gt' || f.operator === 'lt') {
+                        const numCell = parseItalianNumber(cellRaw);
+                        const numFilter = parseItalianNumber(filterVal);
+                        if (isNaN(numCell) || isNaN(numFilter)) return false;
+                        return f.operator === 'gt' ? numCell > numFilter : numCell < numFilter;
+                    }
+                    return true;
                 });
-                if (nonEmpty) rows.push(obj);
-            }
-
-            return rows.length > 0 ? { headers, rows } : null;
-        }
-
-        function handleFilesUpload(fileList) {
-            Array.from(fileList).forEach(file => {
-                const reader = new FileReader();
-                reader.onload = (evt) => {
-                    try {
-                        const wb = XLSX.read(evt.target.result, { type: 'array', cellDates: true });
-                        const parsedSheets = {};
-                        let firstValidSheet = null;
-
-                        wb.SheetNames.forEach(sName => {
-                            const matrix = XLSX.utils.sheet_to_json(wb.Sheets[sName], { header: 1, raw: false, defval: '' });
-                            const parsed = parseSheetMatrix(matrix);
-                            if (parsed) {
-                                parsedSheets[sName] = parsed;
-                                if (!firstValidSheet) firstValidSheet = sName;
-                            }
-                        });
-
-                        if (!firstValidSheet) {
-                            showToast(`Nessuna tabella valida trovata in "${file.name}"`, 'error');
-                            return;
-                        }
-
-                        const id = 'wb-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
-                        loadedWorkbooks.unshift({
-                            id,
-                            fileName: file.name,
-                            sheets: parsedSheets,
-                            activeSheet: firstValidSheet
-                        });
-                        selectDataset(id);
-                        showToast(`Caricato "${file.name}" (${parsedSheets[firstValidSheet].rows.length} righe)!`);
-                    } catch (err) {
-                        showToast(`Errore lettura "${file.name}"`, 'error');
-                    }
-                };
-                reader.readAsArrayBuffer(file);
             });
         }
 
-        function loadDemoDataset() {
-            const demoHeaders = ['Codice Alloggio', 'Comune', 'Zona', 'Classe Catastale', 'Superficie (mq)', 'Rendita Catastale (€)', 'Stato Occupazione', 'Canone Mensile (€)'];
-            const demoRows = [
-                { 'Codice Alloggio': 'ALL-001', 'Comune': 'Milano', 'Zona': 'Centro', 'Classe Catastale': 'A/2', 'Superficie (mq)': '95', 'Rendita Catastale (€)': '1250,00', 'Stato Occupazione': 'Locato', 'Canone Mensile (€)': '1100,00' },
-                { 'Codice Alloggio': 'ALL-002', 'Comune': 'Milano', 'Zona': 'Navigli', 'Classe Catastale': 'A/3', 'Superficie (mq)': '68', 'Rendita Catastale (€)': '780,50', 'Stato Occupazione': 'Locato', 'Canone Mensile (€)': '850,00' },
-                { 'Codice Alloggio': 'ALL-003', 'Comune': 'Milano', 'Zona': 'Periferia Nord', 'Classe Catastale': 'A/4', 'Superficie (mq)': '54', 'Rendita Catastale (€)': '420,00', 'Stato Occupazione': 'Sfitto - Da ristrutturare', 'Canone Mensile (€)': '0,00' },
-                { 'Codice Alloggio': 'ALL-004', 'Comune': 'Monza', 'Zona': 'Centro', 'Classe Catastale': 'A/2', 'Superficie (mq)': '110', 'Rendita Catastale (€)': '1340,00', 'Stato Occupazione': 'Locato', 'Canone Mensile (€)': '980,00' },
-                { 'Codice Alloggio': 'ALL-005', 'Comune': 'Monza', 'Zona': 'San Biagio', 'Classe Catastale': 'A/3', 'Superficie (mq)': '75', 'Rendita Catastale (€)': '690,00', 'Stato Occupazione': 'Sfitto - Pronto', 'Canone Mensile (€)': '0,00' },
-                { 'Codice Alloggio': 'ALL-006', 'Comune': 'Bergamo', 'Zona': 'Città Bassa', 'Classe Catastale': 'A/3', 'Superficie (mq)': '82', 'Rendita Catastale (€)': '710,00', 'Stato Occupazione': 'Locato', 'Canone Mensile (€)': '720,00' },
-                { 'Codice Alloggio': 'ALL-007', 'Comune': 'Bergamo', 'Zona': 'Periferia', 'Classe Catastale': 'A/4', 'Superficie (mq)': '60', 'Rendita Catastale (€)': '390,00', 'Stato Occupazione': 'Locato', 'Canone Mensile (€)': '490,00' },
-                { 'Codice Alloggio': 'ALL-008', 'Comune': 'Milano', 'Zona': 'Porta Romana', 'Classe Catastale': 'A/1', 'Superficie (mq)': '145', 'Rendita Catastale (€)': '2450,00', 'Stato Occupazione': 'Locato', 'Canone Mensile (€)': '2100,00' },
-                { 'Codice Alloggio': 'ALL-009', 'Comune': 'Brescia', 'Zona': 'Centro', 'Classe Catastale': 'A/3', 'Superficie (mq)': '70', 'Rendita Catastale (€)': '610,00', 'Stato Occupazione': 'Sfitto - Da ristrutturare', 'Canone Mensile (€)': '0,00' },
-                { 'Codice Alloggio': 'ALL-010', 'Comune': 'Brescia', 'Zona': 'Nord', 'Classe Catastale': 'A/4', 'Superficie (mq)': '58', 'Rendita Catastale (€)': '410,00', 'Stato Occupazione': 'Locato', 'Canone Mensile (€)': '460,00' }
-            ];
+        function updateFilteredStatusUI() {
+            const sData = getActiveSheetData();
+            if (!sData) return;
+            const filtered = getFilteredRows();
+            const total = sData.rows.length;
+            const hasActive = activePreFilters.some(f => f.column && String(f.value ?? '').trim() !== '');
 
-            const id = 'demo-' + Date.now();
-            loadedWorkbooks.unshift({
-                id,
-                fileName: 'Patrimonio_Alloggi_Catasto.xlsx',
-                sheets: { 'Elenco Alloggi': { headers: demoHeaders, rows: demoRows } },
-                activeSheet: 'Elenco Alloggi'
-            });
-            selectDataset(id);
-            customIndicatorsPrompt.value = 'Raggruppa gli alloggi per Classe Catastale, calcola il numero di unità, la superficie totale (mq), la rendita catastale complessiva e il canone mensile totale, evidenziando gli alloggi sfitti.';
-            showToast('Caricato dataset di esempio: Patrimonio Alloggi Catasto');
-        }
-
-        function selectDataset(id) {
-            activeDatasetId = id;
-            renderDatasetsList();
-            const ds = getActiveDataset();
-            if (!ds) return;
-
-            const sheetNames = Object.keys(ds.sheets);
-            if (sheetNames.length > 1) {
-                sheetSelectorBox.classList.remove('hidden');
-                sheetSelect.innerHTML = sheetNames.map(s => `<option value="${escapeHtml(s)}" ${s === ds.activeSheet ? 'selected' : ''}>${escapeHtml(s)}</option>`).join('');
+            if (hasActive) {
+                filteredRowsBadge.textContent = `${filtered.length} di ${total} righe`;
+                filteredRowsBadge.className = filtered.length === 0
+                    ? 'px-2 py-0.5 rounded-full text-[11px] font-semibold bg-rose-100 text-rose-800'
+                    : 'px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800';
+                activeRowsBadge.textContent = `${filtered.length} record filtrati (su ${total} totali)`;
             } else {
-                sheetSelectorBox.classList.add('hidden');
+                filteredRowsBadge.textContent = `Tutte (${total})`;
+                filteredRowsBadge.className = 'px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-600';
+                activeRowsBadge.textContent = `${total} record caricati`;
             }
 
-            onActiveSheetChanged();
+            btnResetPrefilters.classList.toggle('hidden', activePreFilters.length === 0);
+            renderRawTablePreview();
         }
 
-        function renderDatasetsList() {
-            datasetsCountBadge.textContent = `${loadedWorkbooks.length} ${loadedWorkbooks.length === 1 ? 'file' : 'file'}`;
-            datasetsList.innerHTML = '';
-            loadedWorkbooks.forEach(wb => {
-                const isActive = wb.id === activeDatasetId;
-                const sData = wb.sheets[wb.activeSheet];
-                const div = document.createElement('div');
-                div.className = isActive
-                    ? 'p-2.5 rounded-xl border-2 border-teal-500 bg-teal-50/60 cursor-pointer flex justify-between items-center transition-all'
-                    : 'p-2.5 rounded-xl border border-slate-200 hover:border-teal-300 bg-white cursor-pointer flex justify-between items-center transition-all';
-                div.innerHTML = `
-                    <div class="min-w-0 pr-2">
-                        <p class="text-xs font-semibold text-slate-800 truncate">${escapeHtml(wb.fileName)}</p>
-                        <p class="text-[11px] text-slate-500">${sData.rows.length} righe &bull; ${sData.headers.length} colonne</p>
-                    </div>
-                    <button type="button" class="btn-del-wb text-slate-400 hover:text-rose-600 p-1 rounded" title="Rimuovi file">
-                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
-                    </button>
-                `;
-                div.querySelector('.btn-del-wb').addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    loadedWorkbooks = loadedWorkbooks.filter(item => item.id !== wb.id);
-                    if (activeDatasetId === wb.id) {
-                        activeDatasetId = loadedWorkbooks[0]?.id || null;
-                    }
-                    if (activeDatasetId) {
-                        selectDataset(activeDatasetId);
-                    } else {
-                        renderDatasetsList();
-                        emptyDashboardState.classList.remove('hidden');
-                        analysisResultsArea.classList.add('hidden');
-                    }
-                });
-                div.addEventListener('click', () => selectDataset(wb.id));
-                datasetsList.appendChild(div);
+        function addPreFilterRule() {
+            const sData = getActiveSheetData();
+            if (!sData || !sData.headers.length) return;
+            activePreFilters.push({
+                id: 'flt-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5),
+                column: sData.headers[0],
+                operator: 'eq',
+                value: ''
             });
+            renderPreFiltersUI();
+            updateFilteredStatusUI();
+        }
+
+        function resetAllPreFilters() {
+            activePreFilters = [];
+            renderPreFiltersUI();
+            updateFilteredStatusUI();
+            showToast('Filtri pre-analisi rimossi');
+        }
+
+        function renderPreFiltersUI() {
+            const sData = getActiveSheetData();
+            if (!sData) return;
+            preFiltersList.innerHTML = '';
+
+            activePreFilters.forEach(rule => {
+                const card = document.createElement('div');
+                card.className = 'p-2.5 rounded-xl bg-amber-50/50 border border-amber-200/80 space-y-2';
+
+                // Valori distinti della colonna selezionata (per suggerimento rapido)
+                const distinctVals = [...new Set(
+                    sData.rows.map(r => String(r[rule.column] ?? '').trim()).filter(Boolean)
+                )].sort((a, b) => a.localeCompare(b, 'it'));
+
+                const datalistId = `dl-${rule.id}`;
+                const useDropdown = (rule.operator === 'eq' || rule.operator === 'neq') && distinctVals.length > 0 && distinctVals.length <= 60;
+
+                card.innerHTML = `
+                    <div class="flex items-center gap-1.5">
+                        <select class="flt-col flex-1 px-2 py-1.5 text-xs rounded-lg border border-slate-200 bg-white font-medium text-slate-700 focus:outline-none focus:border-amber-500">
+                            ${sData.headers.map(h => `<option value="${escapeHtml(h)}" ${h === rule.column ? 'selected' : ''}>${escapeHtml(h)}</option>`).join('')}
+                        </select>
+                        <button type="button" class="flt-del text-slate-400 hover:text-rose-600 p-1 rounded" title="Rimuovi filtro">
+                            <i data-lucide="x" class="w-3.5 h-3.5"></i>
+                        </button>
+                    </div>
+                    <div class="grid grid-cols-12 gap-1.5">
+                        <select class="flt-op col-span-5 px-2 py-1.5 text-[11px] rounded-lg border border-slate-200 bg-white text-slate-700 focus:outline-none focus:border-amber-500">
+                            <option value="eq" ${rule.operator === 'eq' ? 'selected' : ''}>Uguale a</option>
+                            <option value="neq" ${rule.operator === 'neq' ? 'selected' : ''}>Diverso da</option>
+                            <option value="contains" ${rule.operator === 'contains' ? 'selected' : ''}>Contiene</option>
+                            <option value="gt" ${rule.operator === 'gt' ? 'selected' : ''}>Maggiore (&gt;)</option>
+                            <option value="lt" ${rule.operator === 'lt' ? 'selected' : ''}>Minore (&lt;)</option>
+                        </select>
+                        <div class="col-span-7">
+                            ${useDropdown ? `
+                                <select class="flt-val w-full px-2 py-1.5 text-xs rounded-lg border border-slate-200 bg-white text-slate-800 focus:outline-none focus:border-amber-500">
+                                    <option value="">-- Scegli valore --</option>
+                                    ${distinctVals.map(v => `<option value="${escapeHtml(v)}" ${v === rule.value ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('')}
+                                </select>
+                            ` : `
+                                <input type="text" list="${datalistId}" value="${escapeHtml(rule.value)}" placeholder="Valore filtro..." class="flt-val w-full px-2 py-1.5 text-xs rounded-lg border border-slate-200 bg-white text-slate-800 focus:outline-none focus:border-amber-500">
+                                <datalist id="${datalistId}">
+                                    ${distinctVals.slice(0, 40).map(v => `<option value="${escapeHtml(v)}"></option>`).join('')}
+                                </datalist>
+                            `}
+                        </div>
+                    </div>
+                `;
+
+                card.querySelector('.flt-col').addEventListener('change', (e) => {
+                    rule.column = e.target.value;
+                    rule.value = '';
+                    renderPreFiltersUI();
+                    updateFilteredStatusUI();
+                });
+
+                card.querySelector('.flt-op').addEventListener('change', (e) => {
+                    rule.operator = e.target.value;
+                    renderPreFiltersUI();
+                    updateFilteredStatusUI();
+                });
+
+                const valEl = card.querySelector('.flt-val');
+                valEl.addEventListener(valEl.tagName === 'SELECT' ? 'change' : 'input', (e) => {
+                    rule.value = e.target.value;
+                    updateFilteredStatusUI();
+                });
+
+                card.querySelector('.flt-del').addEventListener('click', () => {
+                    activePreFilters = activePreFilters.filter(item => item.id !== rule.id);
+                    renderPreFiltersUI();
+                    updateFilteredStatusUI();
+                });
+
+                preFiltersList.appendChild(card);
+            });
+
             lucide.createIcons();
         }
 
@@ -650,15 +660,176 @@
             return headers.filter(h => {
                 let numCount = 0;
                 let nonEmpty = 0;
-                rows.slice(0, 30).forEach(r => {
-                    const v = String(r[h] ?? '').trim();
-                    if (v !== '') {
-                        nonEmpty++;
-                        if (!isNaN(parseItalianNumber(v))) numCount++;
-                    }
+                rows.slice(0, 60).forEach(r => {
+                    const val = String(r[h] ?? '').trim();
+                    if (!val) return;
+                    nonEmpty++;
+                    if (!isNaN(parseItalianNumber(val))) numCount++;
                 });
                 return nonEmpty > 0 && (numCount / nonEmpty) >= 0.7;
             });
+        }
+
+        function handleFilesUpload(fileList) {
+            if (typeof XLSX === 'undefined') {
+                showToast('Libreria Excel non ancora pronta, riprova tra un secondo', 'error');
+                return;
+            }
+            Array.from(fileList).forEach(file => {
+                const reader = new FileReader();
+                reader.onload = function(evt) {
+                    try {
+                        const wb = XLSX.read(evt.target.result, { type: 'array', cellDates: true });
+                        const sheetsObj = {};
+                        let firstValidSheet = null;
+
+                        wb.SheetNames.forEach(sName => {
+                            const ws = wb.Sheets[sName];
+                            const matrix = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+                            const nonEmpty = matrix.filter(r => Array.isArray(r) && r.some(c => String(c ?? '').trim() !== ''));
+                            if (nonEmpty.length < 2) return;
+
+                            const rawHeaders = nonEmpty[0];
+                            const headers = [];
+                            const used = new Set();
+                            rawHeaders.forEach((h, idx) => {
+                                let clean = String(h ?? '').replace(/\s+/g, ' ').trim() || `Colonna_${idx + 1}`;
+                                let unique = clean;
+                                let c = 2;
+                                while (used.has(unique.toLowerCase())) unique = `${clean} (${c++})`;
+                                used.add(unique.toLowerCase());
+                                headers.push(unique);
+                            });
+
+                            const rows = [];
+                            for (let r = 1; r < nonEmpty.length; r++) {
+                                const rowArr = nonEmpty[r];
+                                const obj = {};
+                                let hasVal = false;
+                                headers.forEach((h, idx) => {
+                                    const val = String(rowArr[idx] ?? '').trim();
+                                    if (val !== '') hasVal = true;
+                                    obj[h] = val;
+                                });
+                                if (hasVal) rows.push(obj);
+                            }
+
+                            if (rows.length > 0) {
+                                sheetsObj[sName] = { headers, rows };
+                                if (!firstValidSheet) firstValidSheet = sName;
+                            }
+                        });
+
+                        if (!firstValidSheet) {
+                            showToast(`Il file "${file.name}" non contiene tabelle valide`, 'error');
+                            return;
+                        }
+
+                        const newId = 'ds-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+                        loadedWorkbooks.push({
+                            id: newId,
+                            fileName: file.name,
+                            sheets: sheetsObj,
+                            activeSheet: firstValidSheet
+                        });
+                        activeDatasetId = newId;
+                        renderDatasetsList();
+                        onActiveSheetChanged();
+                        showToast(`Caricato "${file.name}"!`);
+                    } catch (err) {
+                        showToast(`Errore lettura "${file.name}"`, 'error');
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        function loadDemoDataset() {
+            const demoId = 'demo-' + Date.now();
+            const headers = ['Codice_Alloggio', 'Comune', 'Classe_Catastale', 'Superficie_Mq', 'Rendita_Catastale', 'Stato_Occupazione', 'Canone_Annuo'];
+            const rows = [
+                { Codice_Alloggio: 'ALL-001', Comune: 'Milano', Classe_Catastale: 'A/2', Superficie_Mq: '95', Rendita_Catastale: '1.150,00', Stato_Occupazione: 'Locato', Canone_Annuo: '12.600,00' },
+                { Codice_Alloggio: 'ALL-002', Comune: 'Milano', Classe_Catastale: 'A/3', Superficie_Mq: '68', Rendita_Catastale: '680,50', Stato_Occupazione: 'Locato', Canone_Annuo: '8.400,00' },
+                { Codice_Alloggio: 'ALL-003', Comune: 'Monza', Classe_Catastale: 'A/2', Superficie_Mq: '110', Rendita_Catastale: '1.320,00', Stato_Occupazione: 'Sfitto', Canone_Annuo: '0,00' },
+                { Codice_Alloggio: 'ALL-004', Comune: 'Milano', Classe_Catastale: 'A/4', Superficie_Mq: '52', Rendita_Catastale: '410,00', Stato_Occupazione: 'Da ristrutturare', Canone_Annuo: '0,00' },
+                { Codice_Alloggio: 'ALL-005', Comune: 'Bergamo', Classe_Catastale: 'A/3', Superficie_Mq: '82', Rendita_Catastale: '740,00', Stato_Occupazione: 'Locato', Canone_Annuo: '7.800,00' },
+                { Codice_Alloggio: 'ALL-006', Comune: 'Monza', Classe_Catastale: 'A/3', Superficie_Mq: '75', Rendita_Catastale: '710,00', Stato_Occupazione: 'Locato', Canone_Annuo: '8.100,00' },
+                { Codice_Alloggio: 'ALL-007', Comune: 'Milano', Classe_Catastale: 'A/2', Superficie_Mq: '125', Rendita_Catastale: '1.580,00', Stato_Occupazione: 'Locato', Canone_Annuo: '16.200,00' },
+                { Codice_Alloggio: 'ALL-008', Comune: 'Bergamo', Classe_Catastale: 'A/4', Superficie_Mq: '58', Rendita_Catastale: '435,00', Stato_Occupazione: 'Sfitto', Canone_Annuo: '0,00' },
+                { Codice_Alloggio: 'ALL-009', Comune: 'Milano', Classe_Catastale: 'A/3', Superficie_Mq: '70', Rendita_Catastale: '695,00', Stato_Occupazione: 'Locato', Canone_Annuo: '9.000,00' },
+                { Codice_Alloggio: 'ALL-010', Comune: 'Monza', Classe_Catastale: 'A/2', Superficie_Mq: '102', Rendita_Catastale: '1.210,00', Stato_Occupazione: 'Da ristrutturare', Canone_Annuo: '0,00' }
+            ];
+            loadedWorkbooks.push({
+                id: demoId,
+                fileName: 'Patrimonio_Alloggi_Demo.xlsx',
+                sheets: { 'Elenco Immobili': { headers, rows } },
+                activeSheet: 'Elenco Immobili'
+            });
+            activeDatasetId = demoId;
+            renderDatasetsList();
+            onActiveSheetChanged();
+            showToast('Caricato foglio di esempio "Patrimonio_Alloggi_Demo.xlsx"!');
+        }
+
+        function renderDatasetsList() {
+            datasetsCountBadge.textContent = `${loadedWorkbooks.length} file`;
+            datasetsList.innerHTML = '';
+
+            loadedWorkbooks.forEach(wb => {
+                const isActive = wb.id === activeDatasetId;
+                const activeSheetObj = wb.sheets[wb.activeSheet];
+                const rowCount = activeSheetObj ? activeSheetObj.rows.length : 0;
+
+                const item = document.createElement('div');
+                item.className = `p-2.5 rounded-xl border cursor-pointer transition-all flex items-center justify-between gap-2 ${isActive ? 'bg-teal-50/80 border-teal-400 shadow-sm' : 'bg-white border-slate-200 hover:border-teal-300'}`;
+                item.innerHTML = `
+                    <div class="min-w-0 flex-1">
+                        <p class="text-xs font-semibold text-slate-800 truncate">${escapeHtml(wb.fileName)}</p>
+                        <p class="text-[11px] text-slate-500">${rowCount} righe • Scheda: ${escapeHtml(wb.activeSheet)}</p>
+                    </div>
+                    <button type="button" class="btn-del-ds text-slate-400 hover:text-rose-600 p-1 rounded" title="Rimuovi file">
+                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                    </button>
+                `;
+
+                item.addEventListener('click', () => {
+                    activeDatasetId = wb.id;
+                    renderDatasetsList();
+                    onActiveSheetChanged();
+                });
+
+                item.querySelector('.btn-del-ds').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    loadedWorkbooks = loadedWorkbooks.filter(w => w.id !== wb.id);
+                    if (activeDatasetId === wb.id) {
+                        activeDatasetId = loadedWorkbooks[0]?.id || null;
+                    }
+                    if (activeDatasetId) {
+                        renderDatasetsList();
+                        onActiveSheetChanged();
+                    } else {
+                        renderDatasetsList();
+                        sheetSelectorBox.classList.add('hidden');
+                        preFiltersSection.classList.add('hidden');
+                        emptyDashboardState.classList.remove('hidden');
+                        analysisResultsArea.classList.add('hidden');
+                    }
+                });
+
+                datasetsList.appendChild(item);
+            });
+
+            const activeDs = getActiveDataset();
+            if (activeDs) {
+                const sheetNames = Object.keys(activeDs.sheets);
+                if (sheetNames.length > 1) {
+                    sheetSelect.innerHTML = sheetNames.map(s => `<option value="${escapeHtml(s)}" ${s === activeDs.activeSheet ? 'selected' : ''}>${escapeHtml(s)}</option>`).join('');
+                    sheetSelectorBox.classList.remove('hidden');
+                } else {
+                    sheetSelectorBox.classList.add('hidden');
+                }
+            }
+            lucide.createIcons();
         }
 
         function onActiveSheetChanged() {
@@ -668,6 +839,9 @@
 
             emptyDashboardState.classList.add('hidden');
             analysisResultsArea.classList.remove('hidden');
+            preFiltersSection.classList.remove('hidden');
+            activePreFilters = [];
+            renderPreFiltersUI();
             aiSuggestionsContainer.classList.add('hidden');
             aiVisualSummaryGrid.classList.add('hidden');
             aiVisualSummaryGrid.classList.remove('grid');
@@ -677,7 +851,7 @@
             activeFileBadge.textContent = `${ds.fileName} [${ds.activeSheet}]`;
             activeRowsBadge.textContent = `${sData.rows.length} record caricati`;
             prospectusTitle.textContent = `Analisi: ${ds.fileName}`;
-            prospectusSubtitle.textContent = 'Imposta gli indicatori a sinistra o clicca "Suggerisci Indicatori" e avvia l\'analisi AI.';
+            prospectusSubtitle.textContent = 'Imposta eventuali filtri e gli indicatori a sinistra, poi avvia l\'analisi AI.';
 
             const numericCols = detectNumericColumns(sData.headers, sData.rows);
 
@@ -720,19 +894,20 @@
             `;
 
             rawTableSearch.value = '';
-            renderRawTablePreview();
+            updateFilteredStatusUI();
         }
 
         function renderRawTablePreview() {
             const sData = getActiveSheetData();
             if (!sData) return;
             const q = rawTableSearch.value.trim().toLowerCase();
+            const baseRows = getFilteredRows();
 
             rawTableHead.innerHTML = `<tr>${sData.headers.map(h => `<th class="px-3 py-2 text-left whitespace-nowrap">${escapeHtml(h)}</th>`).join('')}</tr>`;
 
             const filtered = q
-                ? sData.rows.filter(r => Object.values(r).join(' ').toLowerCase().includes(q))
-                : sData.rows;
+                ? baseRows.filter(r => Object.values(r).join(' ').toLowerCase().includes(q))
+                : baseRows;
 
             const slice = filtered.slice(0, 100);
             rawTableBody.innerHTML = slice.map(r => `
@@ -841,10 +1016,10 @@
             aiSuggestionsContainer.classList.remove('hidden');
         }
 
-        function buildLocalFallbackProspectus(sData, exactStats, chosenMetric) {
+        function buildLocalFallbackProspectus(sData, exactStats, chosenMetric, targetRows) {
             const { groupCol, numericCols, groups } = exactStats;
             const metric = (chosenMetric && numericCols.includes(chosenMetric)) ? chosenMetric : (numericCols[0] || '');
-            const totalRows = sData.rows.length;
+            const totalRows = targetRows.length;
             const entries = Object.entries(groups).sort((a, b) => b[1].count - a[1].count);
 
             const fmtNum = (n) => Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -908,7 +1083,7 @@
             btnSuggestIndicators.innerHTML = `<i data-lucide="loader-2" class="w-3 h-3 animate-spin"></i><span>Analisi...</span>`;
             lucide.createIcons();
 
-            const sampleRows = sData.rows.slice(0, 8);
+            const sampleRows = getFilteredRows().slice(0, 8);
             const systemPrompt = `Sei un analista dati e controllo di gestione esperto. Esamina le colonne e un campione di righe di un foglio Excel e proponi esattamente 4 prospetti/indicatori di sintesi estremamente pertinenti al dominio dei dati.
 Restituisci SOLO un array JSON valido di 4 oggetti con questa struttura esatta (nessun markdown, nessun testo extra):
 [{"titolo": "Breve titolo prospetto", "groupBy": "Nome esatto colonna per raggruppare", "metricCol": "Nome esatto colonna numerica o stringa vuota", "istruzione": "Istruzione dettagliata per generare il prospetto"}]`;
@@ -939,12 +1114,12 @@ Restituisci SOLO un array JSON valido di 4 oggetti con questa struttura esatta (
         }
 
         // Pre-calcola aggregazioni matematiche esatte in JS per evitare allucinazioni numeriche dell'AI
-        function computeExactAggregations(sData, chosenGroupCol) {
-            const numericCols = detectNumericColumns(sData.headers, sData.rows);
+        function computeExactAggregations(sData, chosenGroupCol, targetRows) {
+            const numericCols = detectNumericColumns(sData.headers, targetRows);
             const groupCol = chosenGroupCol || sData.headers.find(h => !numericCols.includes(h)) || sData.headers[0];
             const groups = {};
 
-            sData.rows.forEach(row => {
+            targetRows.forEach(row => {
                 const key = String(row[groupCol] ?? '').trim() || '(Non specificato)';
                 if (!groups[key]) {
                     groups[key] = { count: 0, sums: {} };
@@ -967,6 +1142,12 @@ Restituisci SOLO un array JSON valido di 4 oggetti con questa struttura esatta (
                 return;
             }
 
+            const targetRows = getFilteredRows();
+            if (targetRows.length === 0) {
+                showToast('Nessun record corrisponde ai filtri pre-analisi selezionati!', 'error');
+                return;
+            }
+
             const origHtml = btnRunAnalysis.innerHTML;
             btnRunAnalysis.disabled = true;
             btnRunAnalysis.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span>Elaborazione Prospetto AI...</span>`;
@@ -976,17 +1157,23 @@ Restituisci SOLO un array JSON valido di 4 oggetti con questa struttura esatta (
             const chosenMetric = metricColSelect.value;
             const userInstruction = customIndicatorsPrompt.value.trim() || 'Crea un prospetto riepilogativo chiaro suddiviso per tipologia principale con conteggi, totali e percentuali.';
 
-            // Calcolo statistico esatto sull'intero dataset + invio dati completi (fino a 250 righe) o riepilogo aggregato
-            const exactStats = computeExactAggregations(sData, chosenGroup);
-            const datasetPayload = sData.rows.length <= 200
-                ? { totalRows: sData.rows.length, headers: sData.headers, exactGroupStats: exactStats, allRows: sData.rows }
-                : { totalRows: sData.rows.length, headers: sData.headers, exactGroupStats: exactStats, sampleRows: sData.rows.slice(0, 60) };
+            const activeFiltersSummary = activePreFilters
+                .filter(f => f.column && String(f.value ?? '').trim() !== '')
+                .map(f => `${f.column} (${f.operator}) "${f.value}"`);
 
-            const systemPrompt = `Sei un analista dati e controller aziendale. Devi generare un prospetto riepilogativo rigoroso basato ESCLUSIVAMENTE sui dati forniti, usando i calcoli esatti presenti in exactGroupStats quando pertinenti.
-Restituisci SOLO un oggetto JSON valido (senza markdown \`\`\`json) con questa struttura esatta:
+            // Calcolo statistico esatto sulle righe filtrate + invio dati completi (fino a 200 righe) o riepilogo aggregato
+            const exactStats = computeExactAggregations(sData, chosenGroup, targetRows);
+            const datasetPayload = targetRows.length <= 200
+                ? { totalRows: targetRows.length, originalTotalRows: sData.rows.length, activeFilters: activeFiltersSummary, headers: sData.headers, exactGroupStats: exactStats, allRows: targetRows }
+                : { totalRows: targetRows.length, originalTotalRows: sData.rows.length, activeFilters: activeFiltersSummary, headers: sData.headers, exactGroupStats: exactStats, sampleRows: targetRows.slice(0, 60) };
+
+            const systemPrompt = `Sei un esperto analista dati e controllo di gestione per uffici pubblici e aziende italiane.
+Analizza i dati del foglio Excel (già filtrati secondo eventuali filtri pre-analisi) e le aggregazioni esatte fornite, e genera un prospetto sintetico chiaro, accurato e immediatamente leggibile.
+IMPORTANTE: Usa i numeri esatti presenti in "exactGroupStats" o calcolati dai dati senza inventare cifre.
+Restituisci SOLO un oggetto JSON valido con questa struttura esatta (nessun markdown, nessun testo prima o dopo):
 {
-  "titoloProspetto": "Titolo chiaro e professionale del prospetto",
-  "sottotitolo": "Breve descrizione dei criteri di aggregazione usati",
+  "titoloProspetto": "Titolo chiaro del prospetto",
+  "sottotitolo": "Breve descrizione dei criteri/indicatori e filtri applicati",
   "kpis": [
     {"etichetta": "Nome KPI 1", "valore": "Valore formattato", "dettaglio": "Nota breve"},
     {"etichetta": "Nome KPI 2", "valore": "Valore formattato", "dettaglio": "Nota breve"},
@@ -1008,6 +1195,7 @@ Restituisci SOLO un oggetto JSON valido (senza markdown \`\`\`json) con questa s
 }`;
 
             const userQuery = `Richiesta utente / Indicatori: ${userInstruction}
+Filtri pre-analisi applicati: ${activeFiltersSummary.length ? activeFiltersSummary.join(' AND ') : 'Nessuno (intero dataset)'}
 Colonna raggruppamento preferita: ${chosenGroup || 'Scegli la più significativa'}
 Metrica preferita: ${chosenMetric || 'Conteggio e somme principali'}
 Dati del foglio Excel: ${JSON.stringify(datasetPayload)}`;
@@ -1021,10 +1209,10 @@ Dati del foglio Excel: ${JSON.stringify(datasetPayload)}`;
                 showToast('Prospetto AI generato con successo!');
             } catch (err) {
                 console.warn('Fallback su calcolo locale:', err);
-                const fallbackData = buildLocalFallbackProspectus(sData, exactStats, chosenMetric);
+                const fallbackData = buildLocalFallbackProspectus(sData, exactStats, chosenMetric, targetRows);
                 lastProspectusData = fallbackData;
                 renderProspectusOutput(fallbackData);
-                showToast('Prospetto generato con calcolo statistico locale (imposta API Key per analisi AI completa).');
+                showToast('Prospetto generato con calcolo statistico locale.');
             } finally {
                 btnRunAnalysis.disabled = false;
                 btnRunAnalysis.innerHTML = origHtml;
