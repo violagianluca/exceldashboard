@@ -1,0 +1,1160 @@
+<!DOCTYPE html>
+<html lang="it" class="h-full bg-slate-50">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ExcelPulse AI - Dashboard Analisi e Prospetti</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- SheetJS (XLSX) per lettura ed esportazione Excel -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <!-- Chart.js per grafici interattivi sui prospetti -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        @media print {
+            .no-print { display: none !important; }
+            body { background: white !important; }
+        }
+    </style>
+</head>
+<body class="h-full text-slate-800 flex flex-col antialiased selection:bg-teal-600 selection:text-white">
+
+    <!-- Header -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm no-print">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16 items-center gap-3">
+                <div class="flex items-center space-x-3">
+                    <div class="bg-gradient-to-br from-teal-600 to-emerald-600 text-white p-2.5 rounded-xl shadow-md shadow-teal-500/20">
+                        <i data-lucide="bar-chart-3" class="w-6 h-6"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-bold text-slate-900 tracking-tight">ExcelPulse AI</h1>
+                        <p class="text-xs text-slate-500 hidden sm:block">Analisi intelligente fogli Excel, indicatori e prospetti automatici</p>
+                    </div>
+                </div>
+
+                <div class="flex items-center space-x-2">
+                    <label class="cursor-pointer inline-flex items-center space-x-2 px-3.5 py-2 text-sm font-semibold text-white bg-teal-600 hover:bg-teal-700 rounded-xl transition-all shadow-sm">
+                        <i data-lucide="file-spreadsheet" class="w-4 h-4"></i>
+                        <span>Carica Excel / CSV</span>
+                        <input type="file" id="excel-file-input" accept=".xlsx,.xls,.csv" multiple class="hidden">
+                    </label>
+                    <button id="btn-load-demo" type="button" class="inline-flex items-center space-x-1.5 px-3 py-2 text-xs font-medium text-teal-800 bg-teal-50 hover:bg-teal-100 border border-teal-200 rounded-xl transition-all" title="Carica un foglio di esempio (Alloggi e Classi Catastali) per provare subito">
+                        <i data-lucide="sparkles" class="w-3.5 h-3.5 text-teal-600"></i>
+                        <span class="hidden md:inline">Carica Dati Esempio</span>
+                    </button>
+                    <button id="btn-open-apikey" type="button" class="p-2 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl border border-slate-200 transition-all" title="Configura Chiave API Gemini (opzionale su Netlify)">
+                        <i data-lucide="key" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed bottom-5 right-5 z-50 transform translate-y-20 opacity-0 transition-all duration-300 pointer-events-none no-print">
+        <div class="bg-slate-900 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center space-x-3 border border-slate-700">
+            <div id="toast-icon" class="text-emerald-400"><i data-lucide="check-circle" class="w-5 h-5"></i></div>
+            <span id="toast-message" class="text-sm font-medium">Notifica</span>
+        </div>
+    </div>
+
+    <!-- Main Layout -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- Colonna Sinistra: Archivio Fogli Caricati & Configurazione Indicatori -->
+        <aside class="lg:col-span-4 space-y-5 no-print">
+
+            <!-- Box 1: Fogli Caricati & Schede -->
+            <section class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div class="p-4 border-b border-slate-100 bg-slate-50/60 flex justify-between items-center">
+                    <div class="flex items-center space-x-2">
+                        <i data-lucide="layers" class="w-4 h-4 text-teal-600"></i>
+                        <h2 class="font-semibold text-slate-800 text-xs uppercase tracking-wider">1. Fogli Excel Caricati</h2>
+                    </div>
+                    <span id="datasets-count-badge" class="px-2 py-0.5 rounded-full text-xs font-semibold bg-teal-100 text-teal-800">0 file</span>
+                </div>
+
+                <div class="p-4 space-y-3">
+                    <!-- Area Drop -->
+                    <div id="drop-zone" class="p-4 border-2 border-dashed border-slate-200 hover:border-teal-400 bg-slate-50/60 hover:bg-teal-50/40 rounded-xl text-center cursor-pointer transition-all space-y-1">
+                        <i data-lucide="upload-cloud" class="w-6 h-6 text-teal-600 mx-auto"></i>
+                        <p class="text-xs font-medium text-slate-700">Trascina qui uno o più file <b>.xlsx</b>, <b>.xls</b>, <b>.csv</b></p>
+                        <p class="text-[11px] text-slate-400">Puoi caricare più file d'ufficio e passare dall'uno all'altro</p>
+                    </div>
+
+                    <!-- Lista Dataset Caricati -->
+                    <div id="datasets-list" class="space-y-2 max-h-48 overflow-y-auto"></div>
+
+                    <!-- Selettore Scheda (se il file Excel ha più tab) -->
+                    <div id="sheet-selector-box" class="hidden pt-2 border-t border-slate-100">
+                        <label for="sheet-select" class="block text-[11px] font-semibold text-slate-500 uppercase mb-1">Scheda del file Excel:</label>
+                        <select id="sheet-select" class="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-200 bg-slate-50 font-medium text-slate-700 focus:outline-none focus:border-teal-500"></select>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Box 2: Indicatori e Criteri di Analisi AI -->
+            <section class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div class="p-4 border-b border-slate-100 bg-slate-50/60 flex justify-between items-center">
+                    <div class="flex items-center space-x-2">
+                        <i data-lucide="sliders-horizontal" class="w-4 h-4 text-indigo-600"></i>
+                        <h2 class="font-semibold text-slate-800 text-xs uppercase tracking-wider">2. Indicatori &amp; Prospetti AI</h2>
+                    </div>
+                    <button id="btn-suggest-indicators" type="button" class="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-[11px] font-semibold transition-all" title="L'AI esamina le colonne del foglio e propone gli indicatori più utili">
+                        <i data-lucide="wand-sparkles" class="w-3 h-3"></i>
+                        <span>Suggerisci Indicatori</span>
+                    </button>
+                </div>
+
+                <div class="p-4 space-y-4">
+                    <!-- Colonne Rilevate -->
+                    <div>
+                        <span class="block text-[11px] font-semibold text-slate-500 uppercase mb-1.5">Colonne Rilevate nel Foglio:</span>
+                        <div id="detected-columns-box" class="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-2 bg-slate-50 rounded-xl border border-slate-100">
+                            <span class="text-xs text-slate-400 italic">Carica un foglio per vedere le colonne...</span>
+                        </div>
+                    </div>
+
+                    <!-- Raggruppamento Rapido Guidato -->
+                    <div class="grid grid-cols-2 gap-2.5">
+                        <div>
+                            <label for="group-by-select" class="block text-[11px] font-semibold text-slate-600 mb-1">Raggruppa per (Tipologia)</label>
+                            <select id="group-by-select" class="w-full px-2.5 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-teal-500">
+                                <option value="">-- Automatico AI --</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="metric-col-select" class="block text-[11px] font-semibold text-slate-600 mb-1">Valore / Metrica Principale</label>
+                            <select id="metric-col-select" class="w-full px-2.5 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-teal-500">
+                                <option value="">-- Conteggio Righe --</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Suggerimenti AI cliccabili -->
+                    <div id="ai-suggestions-container" class="hidden space-y-1.5">
+                        <span class="block text-[11px] font-semibold text-indigo-700 uppercase">Prospetti Suggeriti dall'AI (clicca per applicare):</span>
+                        <div id="ai-suggestions-list" class="flex flex-col gap-1.5"></div>
+                    </div>
+
+                    <!-- Richiesta / Indicatori Personalizzati -->
+                    <div>
+                        <label for="custom-indicators-prompt" class="block text-xs font-semibold text-slate-700 mb-1">
+                            Obiettivo del Prospetto / Indicatori Specifici
+                        </label>
+                        <textarea id="custom-indicators-prompt" rows="3" placeholder="Es. Fammi un prospetto sintetico diviso per Classe Catastale indicando numero di alloggi, superficie totale (mq), rendita catastale media e segnalando eventuali alloggi sfitti o da ristrutturare..." class="w-full p-2.5 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 resize-none leading-relaxed"></textarea>
+                    </div>
+
+                    <button id="btn-run-analysis" type="button" class="w-full py-2.5 px-4 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white rounded-xl text-sm font-semibold transition-all shadow-md shadow-teal-500/20 flex items-center justify-center gap-2">
+                        <i data-lucide="sparkles" class="w-4 h-4"></i>
+                        <span>Genera Prospetto &amp; Analisi AI</span>
+                    </button>
+                </div>
+            </section>
+        </aside>
+
+        <!-- Colonna Destra: Dashboard Risultati, Grafico, Tabella Riepilogativa & Anteprima Dati -->
+        <section class="lg:col-span-8 flex flex-col space-y-5">
+
+            <!-- Stato Vuoto Iniziale -->
+            <div id="empty-dashboard-state" class="bg-white rounded-2xl border border-slate-200 shadow-sm p-10 flex-1 flex flex-col items-center justify-center text-center space-y-4">
+                <div class="w-16 h-16 bg-teal-50 text-teal-600 rounded-2xl flex items-center justify-center">
+                    <i data-lucide="table-properties" class="w-8 h-8"></i>
+                </div>
+                <div class="max-w-md space-y-1.5">
+                    <h3 class="text-lg font-bold text-slate-800">Nessun foglio Excel attivo</h3>
+                    <p class="text-xs text-slate-500 leading-relaxed">
+                        Carica un file Excel o CSV dal tuo ufficio per ispezionare i dati, scegliere gli indicatori di sintesi e ottenere automaticamente prospetti tabellari, grafici ed esportazioni pronte.
+                    </p>
+                </div>
+                <button id="btn-empty-demo" type="button" class="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-semibold shadow-sm transition-all">
+                    Prova con Foglio Esempio (Patrimonio Alloggi)
+                </button>
+            </div>
+
+            <!-- Area Risultati Prospetto AI -->
+            <div id="analysis-results-area" class="hidden space-y-5">
+
+                <!-- Header Prospetto & Azioni Esportazione -->
+                <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-4">
+                    <div class="flex flex-wrap justify-between items-start gap-3 border-b border-slate-100 pb-4">
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <span class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-teal-100 text-teal-800" id="active-file-badge">File</span>
+                                <span class="text-xs text-slate-400" id="active-rows-badge">0 righe analizzate</span>
+                            </div>
+                            <h2 id="prospectus-title" class="text-lg font-bold text-slate-900 mt-1">Prospetto di Sintesi</h2>
+                            <p id="prospectus-subtitle" class="text-xs text-slate-500">Seleziona gli indicatori a sinistra e avvia l'analisi AI per generare il prospetto.</p>
+                        </div>
+
+                        <div class="flex items-center gap-2 no-print">
+                            <button id="btn-export-prospectus-xlsx" type="button" class="hidden inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold transition-all shadow-sm">
+                                <i data-lucide="file-spreadsheet" class="w-3.5 h-3.5"></i>
+                                <span>Esporta Prospetto (.XLSX)</span>
+                            </button>
+                            <button id="btn-print-prospectus" type="button" class="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl text-xs font-medium transition-all">
+                                <i data-lucide="printer" class="w-3.5 h-3.5"></i>
+                                <span>Stampa / PDF</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- KPI Cards -->
+                    <div id="kpi-cards-grid" class="grid grid-cols-2 sm:grid-cols-4 gap-3"></div>
+
+                    <!-- Grafico + Sintesi Esecutiva AI -->
+                    <div id="ai-visual-summary-grid" class="hidden grid-cols-1 md:grid-cols-12 gap-4 pt-2">
+                        <div class="md:col-span-6 bg-slate-50/70 rounded-xl border border-slate-200 p-4 flex flex-col justify-between">
+                            <div class="flex justify-between items-center mb-2">
+                                <span class="text-xs font-bold text-slate-700 uppercase tracking-wide">Distribuzione Grafica</span>
+                                <select id="chart-type-select" class="text-[11px] bg-white border border-slate-200 rounded px-2 py-0.5 text-slate-600 no-print">
+                                    <option value="bar">Barre</option>
+                                    <option value="doughnut">Ciambella</option>
+                                    <option value="pie">Torta</option>
+                                </select>
+                            </div>
+                            <div class="relative h-56 w-full">
+                                <canvas id="prospectus-chart"></canvas>
+                            </div>
+                        </div>
+
+                        <div class="md:col-span-6 bg-indigo-50/50 rounded-xl border border-indigo-100 p-4 space-y-2.5 flex flex-col justify-between">
+                            <div>
+                                <span class="text-xs font-bold text-indigo-900 uppercase tracking-wide flex items-center gap-1.5 mb-2">
+                                    <i data-lucide="sparkles" class="w-4 h-4 text-indigo-600"></i>
+                                    Lettura Critica &amp; Note dell'AI
+                                </span>
+                                <div id="ai-executive-notes" class="text-xs text-slate-700 leading-relaxed space-y-2 whitespace-pre-wrap"></div>
+                            </div>
+                            <div id="ai-anomalies-box" class="hidden p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-[11px] text-amber-900"></div>
+                        </div>
+                    </div>
+
+                    <!-- Tabella Prospetto Generata -->
+                    <div id="prospectus-table-wrapper" class="hidden space-y-2 pt-2">
+                        <div class="flex justify-between items-center">
+                            <h3 class="text-xs font-bold text-slate-700 uppercase tracking-wider">Tabella Prospetto Riepilogativo</h3>
+                            <span class="text-[11px] text-slate-400">Calcolato sull'intero dataset caricato</span>
+                        </div>
+                        <div class="overflow-x-auto rounded-xl border border-slate-200">
+                            <table class="min-w-full divide-y divide-slate-200 text-xs">
+                                <thead id="prospectus-table-head" class="bg-slate-100 text-slate-700 font-semibold"></thead>
+                                <tbody id="prospectus-table-body" class="divide-y divide-slate-100 bg-white"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Anteprima Dati Originali Caricati -->
+                <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden no-print">
+                    <div class="p-4 border-b border-slate-100 bg-slate-50/60 flex flex-wrap justify-between items-center gap-2">
+                        <div class="flex items-center space-x-2">
+                            <i data-lucide="table" class="w-4 h-4 text-slate-600"></i>
+                            <h3 class="font-semibold text-slate-800 text-xs uppercase tracking-wider">Anteprima Dati Originali</h3>
+                        </div>
+                        <div class="relative w-full sm:w-64">
+                            <i data-lucide="search" class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2"></i>
+                            <input type="text" id="raw-table-search" placeholder="Filtra righe nella tabella..." class="w-full pl-8 pr-2.5 py-1 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-teal-500">
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto max-h-72">
+                        <table class="min-w-full divide-y divide-slate-200 text-xs">
+                            <thead id="raw-table-head" class="bg-slate-50 text-slate-600 font-semibold sticky top-0"></thead>
+                            <tbody id="raw-table-body" class="divide-y divide-slate-100 bg-white"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+    </main>
+
+    <!-- Modal Chiave API Gemini -->
+    <div id="modal-apikey" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-2xl max-w-md w-full border border-slate-200 shadow-2xl p-5 space-y-4">
+            <div class="flex justify-between items-center">
+                <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+                    <i data-lucide="key" class="w-4 h-4 text-teal-600"></i>
+                    Configura Chiave API Gemini
+                </h3>
+                <button id="btn-close-apikey" type="button" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-4 h-4"></i></button>
+            </div>
+            <p class="text-xs text-slate-600 leading-relaxed">
+                Puoi inserire qui la tua chiave API Gemini (<code class="bg-slate-100 px-1 rounded">AIza...</code>) per usarla direttamente dal browser, oppure lasciarla vuota se usi una Netlify Function collegata a Git.
+            </p>
+            <div class="space-y-2">
+                <input type="password" id="input-gemini-apikey" placeholder="AIzaSy..." class="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-teal-500 font-mono">
+                <div id="apikey-test-status" class="hidden text-xs p-2.5 rounded-lg border font-medium"></div>
+            </div>
+            <div class="flex flex-wrap justify-between items-center gap-2">
+                <div class="flex items-center gap-1.5">
+                    <button id="btn-clear-apikey" type="button" class="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-medium rounded-lg">Svuota</button>
+                    <button id="btn-test-apikey" type="button" class="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-semibold rounded-lg">Testa AI</button>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button id="btn-cancel-apikey" type="button" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium rounded-lg">Chiudi</button>
+                    <button id="btn-save-apikey" type="button" class="px-4 py-1.5 bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold rounded-lg">Salva Chiave</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Stato Applicazione
+        let loadedWorkbooks = []; // [{ id, fileName, sheets: { sheetName: { headers, rows } }, activeSheet }]
+        let activeDatasetId = null;
+        let lastProspectusData = null; // { title, columns, rows, summaryText, anomalies, chartLabels, chartValues, chartLabelName }
+        let chartInstance = null;
+
+        // Elementi DOM
+        const fileInput = document.getElementById('excel-file-input');
+        const dropZone = document.getElementById('drop-zone');
+        const datasetsList = document.getElementById('datasets-list');
+        const datasetsCountBadge = document.getElementById('datasets-count-badge');
+        const sheetSelectorBox = document.getElementById('sheet-selector-box');
+        const sheetSelect = document.getElementById('sheet-select');
+        const detectedColumnsBox = document.getElementById('detected-columns-box');
+        const groupBySelect = document.getElementById('group-by-select');
+        const metricColSelect = document.getElementById('metric-col-select');
+        const customIndicatorsPrompt = document.getElementById('custom-indicators-prompt');
+        const btnSuggestIndicators = document.getElementById('btn-suggest-indicators');
+        const aiSuggestionsContainer = document.getElementById('ai-suggestions-container');
+        const aiSuggestionsList = document.getElementById('ai-suggestions-list');
+        const btnRunAnalysis = document.getElementById('btn-run-analysis');
+
+        const emptyDashboardState = document.getElementById('empty-dashboard-state');
+        const analysisResultsArea = document.getElementById('analysis-results-area');
+        const activeFileBadge = document.getElementById('active-file-badge');
+        const activeRowsBadge = document.getElementById('active-rows-badge');
+        const prospectusTitle = document.getElementById('prospectus-title');
+        const prospectusSubtitle = document.getElementById('prospectus-subtitle');
+        const kpiCardsGrid = document.getElementById('kpi-cards-grid');
+        const aiVisualSummaryGrid = document.getElementById('ai-visual-summary-grid');
+        const aiExecutiveNotes = document.getElementById('ai-executive-notes');
+        const aiAnomaliesBox = document.getElementById('ai-anomalies-box');
+        const prospectusTableWrapper = document.getElementById('prospectus-table-wrapper');
+        const prospectusTableHead = document.getElementById('prospectus-table-head');
+        const prospectusTableBody = document.getElementById('prospectus-table-body');
+        const btnExportProspectusXlsx = document.getElementById('btn-export-prospectus-xlsx');
+        const btnPrintProspectus = document.getElementById('btn-print-prospectus');
+        const chartTypeSelect = document.getElementById('chart-type-select');
+
+        const rawTableSearch = document.getElementById('raw-table-search');
+        const rawTableHead = document.getElementById('raw-table-head');
+        const rawTableBody = document.getElementById('raw-table-body');
+
+        window.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files?.length) handleFilesUpload(e.target.files);
+                e.target.value = '';
+            });
+
+            dropZone.addEventListener('click', () => fileInput.click());
+            dropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropZone.classList.add('border-teal-500', 'bg-teal-50');
+            });
+            dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-teal-500', 'bg-teal-50'));
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('border-teal-500', 'bg-teal-50');
+                if (e.dataTransfer.files?.length) handleFilesUpload(e.dataTransfer.files);
+            });
+
+            sheetSelect.addEventListener('change', () => {
+                const ds = getActiveDataset();
+                if (!ds) return;
+                ds.activeSheet = sheetSelect.value;
+                onActiveSheetChanged();
+            });
+
+            const btnLoadDemo = document.getElementById('btn-load-demo');
+            if (btnLoadDemo) btnLoadDemo.addEventListener('click', loadDemoDataset);
+            const btnEmptyDemo = document.getElementById('btn-empty-demo');
+            if (btnEmptyDemo) btnEmptyDemo.addEventListener('click', loadDemoDataset);
+            btnSuggestIndicators.addEventListener('click', suggestIndicatorsWithAI);
+            btnRunAnalysis.addEventListener('click', runProspectusAnalysis);
+            btnExportProspectusXlsx.addEventListener('click', exportProspectusToExcel);
+            btnPrintProspectus.addEventListener('click', () => window.print());
+            chartTypeSelect.addEventListener('change', renderChartFromProspectus);
+            rawTableSearch.addEventListener('input', renderRawTablePreview);
+
+            // Modale API Key
+            const modalApikey = document.getElementById('modal-apikey');
+            const apikeyStatusBox = document.getElementById('apikey-test-status');
+            document.getElementById('btn-open-apikey').addEventListener('click', () => {
+                document.getElementById('input-gemini-apikey').value = localStorage.getItem('docufill_gemini_apikey') || '';
+                apikeyStatusBox.classList.add('hidden');
+                modalApikey.classList.remove('hidden');
+            });
+            document.getElementById('btn-close-apikey').addEventListener('click', () => modalApikey.classList.add('hidden'));
+            document.getElementById('btn-cancel-apikey').addEventListener('click', () => modalApikey.classList.add('hidden'));
+            document.getElementById('btn-clear-apikey').addEventListener('click', () => {
+                localStorage.removeItem('docufill_gemini_apikey');
+                document.getElementById('input-gemini-apikey').value = '';
+                apikeyStatusBox.className = 'text-xs p-2.5 rounded-lg border font-medium bg-slate-50 text-slate-700 border-slate-200';
+                apikeyStatusBox.textContent = 'Chiave locale rimossa: ora l\'app proverà a usare /.netlify/functions/gemini.';
+                apikeyStatusBox.classList.remove('hidden');
+            });
+            document.getElementById('btn-test-apikey').addEventListener('click', async () => {
+                const tempVal = document.getElementById('input-gemini-apikey').value.trim();
+                if (tempVal) {
+                    localStorage.setItem('docufill_gemini_apikey', tempVal);
+                } else {
+                    localStorage.removeItem('docufill_gemini_apikey');
+                }
+                apikeyStatusBox.className = 'text-xs p-2.5 rounded-lg border font-medium bg-indigo-50 text-indigo-800 border-indigo-200';
+                apikeyStatusBox.textContent = 'Verifica connessione AI in corso...';
+                apikeyStatusBox.classList.remove('hidden');
+                try {
+                    const reply = await callGeminiAI('Rispondi solo con la parola OK.', 'Sei un test di connessione.');
+                    apikeyStatusBox.className = 'text-xs p-2.5 rounded-lg border font-medium bg-emerald-50 text-emerald-800 border-emerald-200';
+                    apikeyStatusBox.textContent = `Connessione AI riuscita! (${tempVal.startsWith('AIza') ? 'Chiave Browser' : 'Netlify Function'}) -> Risposta: ${reply.trim()}`;
+                } catch (err) {
+                    apikeyStatusBox.className = 'text-xs p-2.5 rounded-lg border font-medium bg-rose-50 text-rose-800 border-rose-200';
+                    apikeyStatusBox.textContent = `Errore: ${err.message}. Nota: se hai caricato il sito su Netlify tramite Drag & Drop manuale, Netlify non attiva le Functions (usa GitHub oppure inserisci qui la chiave AIza...).`;
+                }
+            });
+            document.getElementById('btn-save-apikey').addEventListener('click', () => {
+                const val = document.getElementById('input-gemini-apikey').value.trim();
+                if (val) {
+                    localStorage.setItem('docufill_gemini_apikey', val);
+                } else {
+                    localStorage.removeItem('docufill_gemini_apikey');
+                }
+                modalApikey.classList.add('hidden');
+                showToast('Configurazione API salvata!');
+            });
+        });
+
+        function getActiveDataset() {
+            return loadedWorkbooks.find(w => w.id === activeDatasetId) || null;
+        }
+
+        function getActiveSheetData() {
+            const ds = getActiveDataset();
+            if (!ds) return null;
+            return ds.sheets[ds.activeSheet] || null;
+        }
+
+        function parseSheetMatrix(matrix) {
+            if (!Array.isArray(matrix) || matrix.length < 2) return null;
+
+            let headerRowIdx = -1;
+            let bestScore = -1;
+            for (let r = 0; r < Math.min(matrix.length, 20); r++) {
+                const row = matrix[r];
+                if (!Array.isArray(row)) continue;
+                const nonEmpty = row.map(c => String(c ?? '').trim()).filter(Boolean);
+                const hasNext = r + 1 < matrix.length && Array.isArray(matrix[r + 1]) && matrix[r + 1].some(c => String(c ?? '').trim() !== '');
+                if (nonEmpty.length > 0 && hasNext) {
+                    const textCount = nonEmpty.filter(v => isNaN(Number(v.replace(/[.,€%\s-]/g, '')))).length;
+                    const score = nonEmpty.length * 2 + textCount;
+                    if (score > bestScore) {
+                        bestScore = score;
+                        headerRowIdx = r;
+                    }
+                }
+            }
+            if (headerRowIdx === -1) return null;
+
+            const rawHeaders = matrix[headerRowIdx];
+            let maxCols = rawHeaders.length;
+            for (let i = headerRowIdx + 1; i < Math.min(matrix.length, headerRowIdx + 25); i++) {
+                if (Array.isArray(matrix[i]) && matrix[i].length > maxCols) maxCols = matrix[i].length;
+            }
+
+            const headers = [];
+            const colIndices = [];
+            const used = new Set();
+
+            for (let c = 0; c < maxCols; c++) {
+                let h = String(rawHeaders[c] ?? '').replace(/\s+/g, ' ').trim();
+                const hasData = matrix.slice(headerRowIdx + 1).some(r => Array.isArray(r) && String(r[c] ?? '').trim() !== '');
+                if (!h && !hasData) continue;
+                if (!h) h = `Colonna ${c + 1}`;
+                let uniqueH = h;
+                let dup = 2;
+                while (used.has(uniqueH.toLowerCase())) uniqueH = `${h} (${dup++})`;
+                used.add(uniqueH.toLowerCase());
+                headers.push(uniqueH);
+                colIndices.push(c);
+            }
+
+            const rows = [];
+            for (let r = headerRowIdx + 1; r < matrix.length; r++) {
+                const arr = matrix[r];
+                if (!Array.isArray(arr)) continue;
+                const obj = {};
+                let nonEmpty = false;
+                colIndices.forEach((cIdx, hIdx) => {
+                    const val = arr[cIdx] !== undefined && arr[cIdx] !== null ? String(arr[cIdx]).trim() : '';
+                    if (val !== '') nonEmpty = true;
+                    obj[headers[hIdx]] = val;
+                });
+                if (nonEmpty) rows.push(obj);
+            }
+
+            return rows.length > 0 ? { headers, rows } : null;
+        }
+
+        function handleFilesUpload(fileList) {
+            Array.from(fileList).forEach(file => {
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    try {
+                        const wb = XLSX.read(evt.target.result, { type: 'array', cellDates: true });
+                        const parsedSheets = {};
+                        let firstValidSheet = null;
+
+                        wb.SheetNames.forEach(sName => {
+                            const matrix = XLSX.utils.sheet_to_json(wb.Sheets[sName], { header: 1, raw: false, defval: '' });
+                            const parsed = parseSheetMatrix(matrix);
+                            if (parsed) {
+                                parsedSheets[sName] = parsed;
+                                if (!firstValidSheet) firstValidSheet = sName;
+                            }
+                        });
+
+                        if (!firstValidSheet) {
+                            showToast(`Nessuna tabella valida trovata in "${file.name}"`, 'error');
+                            return;
+                        }
+
+                        const id = 'wb-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+                        loadedWorkbooks.unshift({
+                            id,
+                            fileName: file.name,
+                            sheets: parsedSheets,
+                            activeSheet: firstValidSheet
+                        });
+                        selectDataset(id);
+                        showToast(`Caricato "${file.name}" (${parsedSheets[firstValidSheet].rows.length} righe)!`);
+                    } catch (err) {
+                        showToast(`Errore lettura "${file.name}"`, 'error');
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        function loadDemoDataset() {
+            const demoHeaders = ['Codice Alloggio', 'Comune', 'Zona', 'Classe Catastale', 'Superficie (mq)', 'Rendita Catastale (€)', 'Stato Occupazione', 'Canone Mensile (€)'];
+            const demoRows = [
+                { 'Codice Alloggio': 'ALL-001', 'Comune': 'Milano', 'Zona': 'Centro', 'Classe Catastale': 'A/2', 'Superficie (mq)': '95', 'Rendita Catastale (€)': '1250,00', 'Stato Occupazione': 'Locato', 'Canone Mensile (€)': '1100,00' },
+                { 'Codice Alloggio': 'ALL-002', 'Comune': 'Milano', 'Zona': 'Navigli', 'Classe Catastale': 'A/3', 'Superficie (mq)': '68', 'Rendita Catastale (€)': '780,50', 'Stato Occupazione': 'Locato', 'Canone Mensile (€)': '850,00' },
+                { 'Codice Alloggio': 'ALL-003', 'Comune': 'Milano', 'Zona': 'Periferia Nord', 'Classe Catastale': 'A/4', 'Superficie (mq)': '54', 'Rendita Catastale (€)': '420,00', 'Stato Occupazione': 'Sfitto - Da ristrutturare', 'Canone Mensile (€)': '0,00' },
+                { 'Codice Alloggio': 'ALL-004', 'Comune': 'Monza', 'Zona': 'Centro', 'Classe Catastale': 'A/2', 'Superficie (mq)': '110', 'Rendita Catastale (€)': '1340,00', 'Stato Occupazione': 'Locato', 'Canone Mensile (€)': '980,00' },
+                { 'Codice Alloggio': 'ALL-005', 'Comune': 'Monza', 'Zona': 'San Biagio', 'Classe Catastale': 'A/3', 'Superficie (mq)': '75', 'Rendita Catastale (€)': '690,00', 'Stato Occupazione': 'Sfitto - Pronto', 'Canone Mensile (€)': '0,00' },
+                { 'Codice Alloggio': 'ALL-006', 'Comune': 'Bergamo', 'Zona': 'Città Bassa', 'Classe Catastale': 'A/3', 'Superficie (mq)': '82', 'Rendita Catastale (€)': '710,00', 'Stato Occupazione': 'Locato', 'Canone Mensile (€)': '720,00' },
+                { 'Codice Alloggio': 'ALL-007', 'Comune': 'Bergamo', 'Zona': 'Periferia', 'Classe Catastale': 'A/4', 'Superficie (mq)': '60', 'Rendita Catastale (€)': '390,00', 'Stato Occupazione': 'Locato', 'Canone Mensile (€)': '490,00' },
+                { 'Codice Alloggio': 'ALL-008', 'Comune': 'Milano', 'Zona': 'Porta Romana', 'Classe Catastale': 'A/1', 'Superficie (mq)': '145', 'Rendita Catastale (€)': '2450,00', 'Stato Occupazione': 'Locato', 'Canone Mensile (€)': '2100,00' },
+                { 'Codice Alloggio': 'ALL-009', 'Comune': 'Brescia', 'Zona': 'Centro', 'Classe Catastale': 'A/3', 'Superficie (mq)': '70', 'Rendita Catastale (€)': '610,00', 'Stato Occupazione': 'Sfitto - Da ristrutturare', 'Canone Mensile (€)': '0,00' },
+                { 'Codice Alloggio': 'ALL-010', 'Comune': 'Brescia', 'Zona': 'Nord', 'Classe Catastale': 'A/4', 'Superficie (mq)': '58', 'Rendita Catastale (€)': '410,00', 'Stato Occupazione': 'Locato', 'Canone Mensile (€)': '460,00' }
+            ];
+
+            const id = 'demo-' + Date.now();
+            loadedWorkbooks.unshift({
+                id,
+                fileName: 'Patrimonio_Alloggi_Catasto.xlsx',
+                sheets: { 'Elenco Alloggi': { headers: demoHeaders, rows: demoRows } },
+                activeSheet: 'Elenco Alloggi'
+            });
+            selectDataset(id);
+            customIndicatorsPrompt.value = 'Raggruppa gli alloggi per Classe Catastale, calcola il numero di unità, la superficie totale (mq), la rendita catastale complessiva e il canone mensile totale, evidenziando gli alloggi sfitti.';
+            showToast('Caricato dataset di esempio: Patrimonio Alloggi Catasto');
+        }
+
+        function selectDataset(id) {
+            activeDatasetId = id;
+            renderDatasetsList();
+            const ds = getActiveDataset();
+            if (!ds) return;
+
+            const sheetNames = Object.keys(ds.sheets);
+            if (sheetNames.length > 1) {
+                sheetSelectorBox.classList.remove('hidden');
+                sheetSelect.innerHTML = sheetNames.map(s => `<option value="${escapeHtml(s)}" ${s === ds.activeSheet ? 'selected' : ''}>${escapeHtml(s)}</option>`).join('');
+            } else {
+                sheetSelectorBox.classList.add('hidden');
+            }
+
+            onActiveSheetChanged();
+        }
+
+        function renderDatasetsList() {
+            datasetsCountBadge.textContent = `${loadedWorkbooks.length} ${loadedWorkbooks.length === 1 ? 'file' : 'file'}`;
+            datasetsList.innerHTML = '';
+            loadedWorkbooks.forEach(wb => {
+                const isActive = wb.id === activeDatasetId;
+                const sData = wb.sheets[wb.activeSheet];
+                const div = document.createElement('div');
+                div.className = isActive
+                    ? 'p-2.5 rounded-xl border-2 border-teal-500 bg-teal-50/60 cursor-pointer flex justify-between items-center transition-all'
+                    : 'p-2.5 rounded-xl border border-slate-200 hover:border-teal-300 bg-white cursor-pointer flex justify-between items-center transition-all';
+                div.innerHTML = `
+                    <div class="min-w-0 pr-2">
+                        <p class="text-xs font-semibold text-slate-800 truncate">${escapeHtml(wb.fileName)}</p>
+                        <p class="text-[11px] text-slate-500">${sData.rows.length} righe &bull; ${sData.headers.length} colonne</p>
+                    </div>
+                    <button type="button" class="btn-del-wb text-slate-400 hover:text-rose-600 p-1 rounded" title="Rimuovi file">
+                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                    </button>
+                `;
+                div.querySelector('.btn-del-wb').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    loadedWorkbooks = loadedWorkbooks.filter(item => item.id !== wb.id);
+                    if (activeDatasetId === wb.id) {
+                        activeDatasetId = loadedWorkbooks[0]?.id || null;
+                    }
+                    if (activeDatasetId) {
+                        selectDataset(activeDatasetId);
+                    } else {
+                        renderDatasetsList();
+                        emptyDashboardState.classList.remove('hidden');
+                        analysisResultsArea.classList.add('hidden');
+                    }
+                });
+                div.addEventListener('click', () => selectDataset(wb.id));
+                datasetsList.appendChild(div);
+            });
+            lucide.createIcons();
+        }
+
+        function parseItalianNumber(val) {
+            if (typeof val === 'number') return val;
+            const str = String(val ?? '').replace(/[€%\s]/g, '').trim();
+            if (!str) return NaN;
+            // Gestisce formato italiano 1.250,50 -> 1250.50
+            if (str.includes(',') && str.includes('.')) {
+                return Number(str.replace(/\./g, '').replace(',', '.'));
+            }
+            if (str.includes(',')) {
+                return Number(str.replace(',', '.'));
+            }
+            return Number(str);
+        }
+
+        function detectNumericColumns(headers, rows) {
+            return headers.filter(h => {
+                let numCount = 0;
+                let nonEmpty = 0;
+                rows.slice(0, 30).forEach(r => {
+                    const v = String(r[h] ?? '').trim();
+                    if (v !== '') {
+                        nonEmpty++;
+                        if (!isNaN(parseItalianNumber(v))) numCount++;
+                    }
+                });
+                return nonEmpty > 0 && (numCount / nonEmpty) >= 0.7;
+            });
+        }
+
+        function onActiveSheetChanged() {
+            const ds = getActiveDataset();
+            const sData = getActiveSheetData();
+            if (!ds || !sData) return;
+
+            emptyDashboardState.classList.add('hidden');
+            analysisResultsArea.classList.remove('hidden');
+            aiSuggestionsContainer.classList.add('hidden');
+            aiVisualSummaryGrid.classList.add('hidden');
+            aiVisualSummaryGrid.classList.remove('grid');
+            prospectusTableWrapper.classList.add('hidden');
+            btnExportProspectusXlsx.classList.add('hidden');
+
+            activeFileBadge.textContent = `${ds.fileName} [${ds.activeSheet}]`;
+            activeRowsBadge.textContent = `${sData.rows.length} record caricati`;
+            prospectusTitle.textContent = `Analisi: ${ds.fileName}`;
+            prospectusSubtitle.textContent = 'Imposta gli indicatori a sinistra o clicca "Suggerisci Indicatori" e avvia l\'analisi AI.';
+
+            const numericCols = detectNumericColumns(sData.headers, sData.rows);
+
+            // Popola badge colonne
+            detectedColumnsBox.innerHTML = '';
+            sData.headers.forEach(h => {
+                const isNum = numericCols.includes(h);
+                const chip = document.createElement('span');
+                chip.className = isNum
+                    ? 'px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-medium'
+                    : 'px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200 text-[11px] font-medium';
+                chip.textContent = isNum ? `# ${h}` : h;
+                detectedColumnsBox.appendChild(chip);
+            });
+
+            // Popola select Raggruppa per & Metrica
+            groupBySelect.innerHTML = '<option value="">-- Automatico AI --</option>' +
+                sData.headers.map(h => `<option value="${escapeHtml(h)}">${escapeHtml(h)}</option>`).join('');
+            metricColSelect.innerHTML = '<option value="">-- Conteggio Righe --</option>' +
+                numericCols.map(h => `<option value="${escapeHtml(h)}">${escapeHtml(h)}</option>`).join('');
+
+            // KPI rapidi preliminari sul foglio grezzo
+            kpiCardsGrid.innerHTML = `
+                <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+                    <span class="text-[11px] font-medium text-slate-500 block">Totale Record</span>
+                    <span class="text-xl font-bold text-slate-900">${sData.rows.length}</span>
+                </div>
+                <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+                    <span class="text-[11px] font-medium text-slate-500 block">Campi / Colonne</span>
+                    <span class="text-xl font-bold text-slate-900">${sData.headers.length}</span>
+                </div>
+                <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+                    <span class="text-[11px] font-medium text-slate-500 block">Colonne Numeriche</span>
+                    <span class="text-xl font-bold text-teal-700">${numericCols.length}</span>
+                </div>
+                <div class="p-3.5 rounded-xl bg-indigo-50/70 border border-indigo-100">
+                    <span class="text-[11px] font-medium text-indigo-700 block">Stato Prospetto</span>
+                    <span class="text-xs font-bold text-indigo-900 mt-1 block">Pronto per Analisi AI</span>
+                </div>
+            `;
+
+            rawTableSearch.value = '';
+            renderRawTablePreview();
+        }
+
+        function renderRawTablePreview() {
+            const sData = getActiveSheetData();
+            if (!sData) return;
+            const q = rawTableSearch.value.trim().toLowerCase();
+
+            rawTableHead.innerHTML = `<tr>${sData.headers.map(h => `<th class="px-3 py-2 text-left whitespace-nowrap">${escapeHtml(h)}</th>`).join('')}</tr>`;
+
+            const filtered = q
+                ? sData.rows.filter(r => Object.values(r).join(' ').toLowerCase().includes(q))
+                : sData.rows;
+
+            const slice = filtered.slice(0, 100);
+            rawTableBody.innerHTML = slice.map(r => `
+                <tr class="hover:bg-slate-50">
+                    ${sData.headers.map(h => `<td class="px-3 py-2 whitespace-nowrap text-slate-700">${escapeHtml(r[h] ?? '')}</td>`).join('')}
+                </tr>
+            `).join('');
+        }
+
+        // Chiamata AI (Netlify Function o chiave locale)
+        async function callGeminiAI(userQuery, systemPrompt) {
+            const customKey = (localStorage.getItem('docufill_gemini_apikey') || '').trim();
+            const hasValidCustomKey = customKey.startsWith('AIza');
+            const endpoint = hasValidCustomKey
+                ? `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${customKey}`
+                : `/.netlify/functions/gemini`;
+
+            const payload = hasValidCustomKey
+                ? { contents: [{ parts: [{ text: userQuery }] }], systemInstruction: { parts: [{ text: systemPrompt }] } }
+                : { userQuery, systemPrompt };
+
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            const rawText = await response.text();
+            if (rawText.trim().startsWith('<')) {
+                throw new Error('Endpoint AI non attivo in questo ambiente.');
+            }
+
+            let data;
+            try {
+                data = JSON.parse(rawText);
+            } catch (parseErr) {
+                throw new Error('Risposta AI non in formato JSON.');
+            }
+
+            if (!response.ok || data.error) {
+                throw new Error(data.error?.message || 'Errore nella comunicazione con l\'AI');
+            }
+            return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        }
+
+        function extractJsonFromAI(rawText, isArray = false) {
+            const cleaned = String(rawText ?? '').replace(/```json|```/gi, '').trim();
+            const openChar = isArray ? '[' : '{';
+            const closeChar = isArray ? ']' : '}';
+            const start = cleaned.indexOf(openChar);
+            const end = cleaned.lastIndexOf(closeChar);
+            if (start === -1 || end === -1 || end <= start) {
+                throw new Error('Risposta AI non strutturata correttamente');
+            }
+            return JSON.parse(cleaned.slice(start, end + 1));
+        }
+
+        function buildLocalIndicatorSuggestions(sData) {
+            const numericCols = detectNumericColumns(sData.headers, sData.rows);
+            const categoryCols = sData.headers.filter(h => !numericCols.includes(h));
+            const suggestions = [];
+
+            categoryCols.slice(0, 3).forEach((catCol, idx) => {
+                const metric = numericCols[idx] || numericCols[0] || '';
+                suggestions.push({
+                    titolo: metric ? `Riepilogo per ${catCol} (${metric})` : `Distribuzione per ${catCol}`,
+                    groupBy: catCol,
+                    metricCol: metric,
+                    istruzione: metric
+                        ? `Raggruppa tutti i record per "${catCol}", calcola il conteggio, il totale e la media di "${metric}" e le percentuali sul totale.`
+                        : `Raggruppa tutti i record per "${catCol}", calcola il numero di occorrenze e l'incidenza percentuale di ciascuna tipologia.`
+                });
+            });
+
+            if (suggestions.length === 0 && sData.headers.length > 0) {
+                suggestions.push({
+                    titolo: `Prospetto Generale per ${sData.headers[0]}`,
+                    groupBy: sData.headers[0],
+                    metricCol: numericCols[0] || '',
+                    istruzione: `Crea un prospetto riepilogativo raggruppato per "${sData.headers[0]}" con conteggi e totali.`
+                });
+            }
+
+            return suggestions.slice(0, 4);
+        }
+
+        function renderIndicatorSuggestionsList(suggestions, sData) {
+            aiSuggestionsList.innerHTML = '';
+            suggestions.forEach(item => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'text-left p-2 rounded-lg bg-indigo-50/70 hover:bg-indigo-100 border border-indigo-200 text-xs transition-all';
+                btn.innerHTML = `<span class="font-semibold text-indigo-950 block">${escapeHtml(item.titolo)}</span><span class="text-[11px] text-indigo-700 line-clamp-1">${escapeHtml(item.istruzione)}</span>`;
+                btn.addEventListener('click', () => {
+                    if (item.groupBy && sData.headers.includes(item.groupBy)) {
+                        groupBySelect.value = item.groupBy;
+                    }
+                    if (item.metricCol && sData.headers.includes(item.metricCol)) {
+                        metricColSelect.value = item.metricCol;
+                    }
+                    customIndicatorsPrompt.value = item.istruzione;
+                    showToast(`Impostato prospetto: "${item.titolo}"`);
+                });
+                aiSuggestionsList.appendChild(btn);
+            });
+            aiSuggestionsContainer.classList.remove('hidden');
+        }
+
+        function buildLocalFallbackProspectus(sData, exactStats, chosenMetric) {
+            const { groupCol, numericCols, groups } = exactStats;
+            const metric = (chosenMetric && numericCols.includes(chosenMetric)) ? chosenMetric : (numericCols[0] || '');
+            const totalRows = sData.rows.length;
+            const entries = Object.entries(groups).sort((a, b) => b[1].count - a[1].count);
+
+            const fmtNum = (n) => Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const cols = metric
+                ? [groupCol, 'N. Record', '% sul Totale', `Totale ${metric}`, `Media ${metric}`]
+                : [groupCol, 'N. Record', '% sul Totale'];
+
+            let grandMetricSum = 0;
+            const tableRows = entries.map(([cat, info]) => {
+                const pct = totalRows > 0 ? ((info.count / totalRows) * 100).toFixed(1).replace('.', ',') + '%' : '0%';
+                if (metric) {
+                    const sumVal = info.sums[metric] || 0;
+                    const avgVal = info.count > 0 ? sumVal / info.count : 0;
+                    grandMetricSum += sumVal;
+                    return [cat, String(info.count), pct, fmtNum(sumVal), fmtNum(avgVal)];
+                }
+                return [cat, String(info.count), pct];
+            });
+
+            if (metric) {
+                tableRows.push(['TOTALE GENERALE', String(totalRows), '100,0%', fmtNum(grandMetricSum), fmtNum(totalRows > 0 ? grandMetricSum / totalRows : 0)]);
+            } else {
+                tableRows.push(['TOTALE GENERALE', String(totalRows), '100,0%']);
+            }
+
+            const topGroup = entries[0];
+            const kpis = [
+                { etichetta: 'Totale Record Analizzati', valore: String(totalRows), dettaglio: `${entries.length} categorie distinte` },
+                { etichetta: `Categoria Prevalente (${groupCol})`, valore: topGroup ? topGroup[0] : '-', dettaglio: topGroup ? `${topGroup[1].count} elementi` : '' },
+                metric
+                    ? { etichetta: `Totale ${metric}`, valore: fmtNum(grandMetricSum), dettaglio: `Media: ${fmtNum(totalRows > 0 ? grandMetricSum / totalRows : 0)}` }
+                    : { etichetta: 'Tipologie Rilevate', valore: String(entries.length), dettaglio: `Campo: ${groupCol}` },
+                { etichetta: 'Modalità Elaborazione', valore: 'Calcolo Locale', dettaglio: 'Inserisci API Key per note AI' }
+            ];
+
+            return {
+                titoloProspetto: `Prospetto Riepilogativo per ${groupCol}`,
+                sottotitolo: metric ? `Conteggio record e aggregazione della metrica "${metric}"` : `Distribuzione record per "${groupCol}"`,
+                kpis,
+                colonneTabella: cols,
+                righeTabella: tableRows,
+                grafico: {
+                    etichettaSerie: metric ? `Totale ${metric}` : 'N. Record',
+                    labels: entries.map(([cat]) => cat),
+                    values: entries.map(([, info]) => metric ? Number((info.sums[metric] || 0).toFixed(2)) : info.count)
+                },
+                sintesiEsecutiva: `Analizzati ${totalRows} record suddivisi in ${entries.length} categorie del campo "${groupCol}". La tipologia più frequente è "${topGroup ? topGroup[0] : '-'}" con ${topGroup ? topGroup[1].count : 0} occorrenze${metric ? `, mentre il totale complessivo di "${metric}" ammonta a ${fmtNum(grandMetricSum)}` : ''}.`,
+                anomalieSegnalate: ''
+            };
+        }
+
+        async function suggestIndicatorsWithAI() {
+            const sData = getActiveSheetData();
+            if (!sData) {
+                showToast('Carica prima un file Excel!', 'error');
+                return;
+            }
+
+            const origHtml = btnSuggestIndicators.innerHTML;
+            btnSuggestIndicators.disabled = true;
+            btnSuggestIndicators.innerHTML = `<i data-lucide="loader-2" class="w-3 h-3 animate-spin"></i><span>Analisi...</span>`;
+            lucide.createIcons();
+
+            const sampleRows = sData.rows.slice(0, 8);
+            const systemPrompt = `Sei un analista dati e controllo di gestione esperto. Esamina le colonne e un campione di righe di un foglio Excel e proponi esattamente 4 prospetti/indicatori di sintesi estremamente pertinenti al dominio dei dati.
+Restituisci SOLO un array JSON valido di 4 oggetti con questa struttura esatta (nessun markdown, nessun testo extra):
+[{"titolo": "Breve titolo prospetto", "groupBy": "Nome esatto colonna per raggruppare", "metricCol": "Nome esatto colonna numerica o stringa vuota", "istruzione": "Istruzione dettagliata per generare il prospetto"}]`;
+
+            const userQuery = `Colonne disponibili: ${JSON.stringify(sData.headers)}\nCampione prime righe: ${JSON.stringify(sampleRows)}`;
+
+            try {
+                const raw = await callGeminiAI(userQuery, systemPrompt);
+                const suggestions = extractJsonFromAI(raw, true);
+
+                if (Array.isArray(suggestions) && suggestions.length > 0) {
+                    renderIndicatorSuggestionsList(suggestions, sData);
+                    showToast('Indicatori suggeriti dall\'AI pronti!');
+                } else {
+                    const localSuggestions = buildLocalIndicatorSuggestions(sData);
+                    renderIndicatorSuggestionsList(localSuggestions, sData);
+                    showToast('Prospetti suggeriti generati dalle colonne del foglio!');
+                }
+            } catch (err) {
+                const localSuggestions = buildLocalIndicatorSuggestions(sData);
+                renderIndicatorSuggestionsList(localSuggestions, sData);
+                showToast('Suggerimenti generati dalle colonne del foglio (imposta chiave API per AI cloud).');
+            } finally {
+                btnSuggestIndicators.disabled = false;
+                btnSuggestIndicators.innerHTML = origHtml;
+                lucide.createIcons();
+            }
+        }
+
+        // Pre-calcola aggregazioni matematiche esatte in JS per evitare allucinazioni numeriche dell'AI
+        function computeExactAggregations(sData, chosenGroupCol) {
+            const numericCols = detectNumericColumns(sData.headers, sData.rows);
+            const groupCol = chosenGroupCol || sData.headers.find(h => !numericCols.includes(h)) || sData.headers[0];
+            const groups = {};
+
+            sData.rows.forEach(row => {
+                const key = String(row[groupCol] ?? '').trim() || '(Non specificato)';
+                if (!groups[key]) {
+                    groups[key] = { count: 0, sums: {} };
+                    numericCols.forEach(nc => { groups[key].sums[nc] = 0; });
+                }
+                groups[key].count += 1;
+                numericCols.forEach(nc => {
+                    const num = parseItalianNumber(row[nc]);
+                    if (!isNaN(num)) groups[key].sums[nc] += num;
+                });
+            });
+
+            return { groupCol, numericCols, groups };
+        }
+
+        async function runProspectusAnalysis() {
+            const sData = getActiveSheetData();
+            if (!sData) {
+                showToast('Carica prima un foglio Excel!', 'error');
+                return;
+            }
+
+            const origHtml = btnRunAnalysis.innerHTML;
+            btnRunAnalysis.disabled = true;
+            btnRunAnalysis.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span>Elaborazione Prospetto AI...</span>`;
+            lucide.createIcons();
+
+            const chosenGroup = groupBySelect.value;
+            const chosenMetric = metricColSelect.value;
+            const userInstruction = customIndicatorsPrompt.value.trim() || 'Crea un prospetto riepilogativo chiaro suddiviso per tipologia principale con conteggi, totali e percentuali.';
+
+            // Calcolo statistico esatto sull'intero dataset + invio dati completi (fino a 250 righe) o riepilogo aggregato
+            const exactStats = computeExactAggregations(sData, chosenGroup);
+            const datasetPayload = sData.rows.length <= 200
+                ? { totalRows: sData.rows.length, headers: sData.headers, exactGroupStats: exactStats, allRows: sData.rows }
+                : { totalRows: sData.rows.length, headers: sData.headers, exactGroupStats: exactStats, sampleRows: sData.rows.slice(0, 60) };
+
+            const systemPrompt = `Sei un analista dati e controller aziendale. Devi generare un prospetto riepilogativo rigoroso basato ESCLUSIVAMENTE sui dati forniti, usando i calcoli esatti presenti in exactGroupStats quando pertinenti.
+Restituisci SOLO un oggetto JSON valido (senza markdown \`\`\`json) con questa struttura esatta:
+{
+  "titoloProspetto": "Titolo chiaro e professionale del prospetto",
+  "sottotitolo": "Breve descrizione dei criteri di aggregazione usati",
+  "kpis": [
+    {"etichetta": "Nome KPI 1", "valore": "Valore formattato", "dettaglio": "Nota breve"},
+    {"etichetta": "Nome KPI 2", "valore": "Valore formattato", "dettaglio": "Nota breve"},
+    {"etichetta": "Nome KPI 3", "valore": "Valore formattato", "dettaglio": "Nota breve"},
+    {"etichetta": "Nome KPI 4", "valore": "Valore formattato", "dettaglio": "Nota breve"}
+  ],
+  "colonneTabella": ["Tipologia / Categoria", "N. Elementi", "% sul Totale", "Altra Colonna Metrica"],
+  "righeTabella": [
+    ["Valore 1", "10", "25,0%", "1.200,00"],
+    ["TOTALE GENERALE", "40", "100%", "4.800,00"]
+  ],
+  "grafico": {
+    "etichettaSerie": "Nome metrica rappresentata",
+    "labels": ["Cat 1", "Cat 2"],
+    "values": [10, 30]
+  },
+  "sintesiEsecutiva": "Analisi chiara in 3-4 frasi dei risultati principali emersi dal prospetto.",
+  "anomalieSegnalate": "Eventuali criticità, valori mancanti o anomalie riscontrate (oppure stringa vuota se non presenti)."
+}`;
+
+            const userQuery = `Richiesta utente / Indicatori: ${userInstruction}
+Colonna raggruppamento preferita: ${chosenGroup || 'Scegli la più significativa'}
+Metrica preferita: ${chosenMetric || 'Conteggio e somme principali'}
+Dati del foglio Excel: ${JSON.stringify(datasetPayload)}`;
+
+            try {
+                const raw = await callGeminiAI(userQuery, systemPrompt);
+                const parsed = extractJsonFromAI(raw, false);
+
+                lastProspectusData = parsed;
+                renderProspectusOutput(parsed);
+                showToast('Prospetto AI generato con successo!');
+            } catch (err) {
+                console.warn('Fallback su calcolo locale:', err);
+                const fallbackData = buildLocalFallbackProspectus(sData, exactStats, chosenMetric);
+                lastProspectusData = fallbackData;
+                renderProspectusOutput(fallbackData);
+                showToast('Prospetto generato con calcolo statistico locale (imposta API Key per analisi AI completa).');
+            } finally {
+                btnRunAnalysis.disabled = false;
+                btnRunAnalysis.innerHTML = origHtml;
+                lucide.createIcons();
+            }
+        }
+
+        function renderProspectusOutput(data) {
+            prospectusTitle.textContent = data.titoloProspetto || 'Prospetto di Sintesi';
+            prospectusSubtitle.textContent = data.sottotitolo || '';
+
+            // KPI Cards
+            if (Array.isArray(data.kpis) && data.kpis.length > 0) {
+                kpiCardsGrid.innerHTML = data.kpis.slice(0, 4).map((kpi, idx) => `
+                    <div class="p-3.5 rounded-xl ${idx === 0 ? 'bg-teal-50/80 border-teal-200' : 'bg-slate-50 border-slate-200'} border">
+                        <span class="text-[11px] font-medium text-slate-500 block truncate">${escapeHtml(kpi.etichetta || '')}</span>
+                        <span class="text-lg font-bold ${idx === 0 ? 'text-teal-900' : 'text-slate-900'} block mt-0.5">${escapeHtml(String(kpi.valore ?? ''))}</span>
+                        ${kpi.dettaglio ? `<span class="text-[10px] text-slate-500 block mt-0.5 truncate">${escapeHtml(kpi.dettaglio)}</span>` : ''}
+                    </div>
+                `).join('');
+            }
+
+            // Tabella Prospetto
+            if (Array.isArray(data.colonneTabella) && Array.isArray(data.righeTabella)) {
+                prospectusTableHead.innerHTML = `<tr>${data.colonneTabella.map(c => `<th class="px-3.5 py-2.5 text-left whitespace-nowrap">${escapeHtml(String(c))}</th>`).join('')}</tr>`;
+                prospectusTableBody.innerHTML = data.righeTabella.map((row, rIdx) => {
+                    const isTotalRow = rIdx === data.righeTabella.length - 1 && String(row[0] ?? '').toUpperCase().includes('TOTAL');
+                    return `<tr class="${isTotalRow ? 'bg-teal-50/70 font-bold text-slate-900' : 'hover:bg-slate-50 text-slate-700'}">
+                        ${row.map(cell => `<td class="px-3.5 py-2.5 whitespace-nowrap">${escapeHtml(String(cell ?? ''))}</td>`).join('')}
+                    </tr>`;
+                }).join('');
+                prospectusTableWrapper.classList.remove('hidden');
+                btnExportProspectusXlsx.classList.remove('hidden');
+            }
+
+            // Note AI & Anomalie
+            aiExecutiveNotes.textContent = data.sintesiEsecutiva || '';
+            if (data.anomalieSegnalate && data.anomalieSegnalate.trim()) {
+                aiAnomaliesBox.innerHTML = `<b>Attenzione / Anomalie rilevate:</b> ${escapeHtml(data.anomalieSegnalate)}`;
+                aiAnomaliesBox.classList.remove('hidden');
+            } else {
+                aiAnomaliesBox.classList.add('hidden');
+            }
+
+            aiVisualSummaryGrid.classList.remove('hidden');
+            aiVisualSummaryGrid.classList.add('grid');
+            renderChartFromProspectus();
+        }
+
+        function renderChartFromProspectus() {
+            if (!lastProspectusData?.grafico || typeof Chart === 'undefined') return;
+            const ctx = document.getElementById('prospectus-chart').getContext('2d');
+            if (chartInstance) {
+                chartInstance.destroy();
+            }
+
+            const chartType = chartTypeSelect.value || 'bar';
+            const labels = lastProspectusData.grafico.labels || [];
+            const values = (lastProspectusData.grafico.values || []).map(v => Number(v) || 0);
+            const palette = ['#0d9488', '#4f46e5', '#059669', '#d97706', '#e11d48', '#0284c7', '#7c3aed', '#64748b'];
+
+            chartInstance = new Chart(ctx, {
+                type: chartType,
+                data: {
+                    labels,
+                    datasets: [{
+                        label: lastProspectusData.grafico.etichettaSerie || 'Valore',
+                        data: values,
+                        backgroundColor: labels.map((_, i) => palette[i % palette.length]),
+                        borderRadius: chartType === 'bar' ? 6 : 0,
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: chartType !== 'bar',
+                            position: 'bottom',
+                            labels: { boxWidth: 12, font: { size: 11 } }
+                        }
+                    },
+                    scales: chartType === 'bar' ? {
+                        y: { beginAtZero: true, ticks: { font: { size: 11 } } },
+                        x: { ticks: { font: { size: 11 } } }
+                    } : {}
+                }
+            });
+        }
+
+        function exportProspectusToExcel() {
+            if (!lastProspectusData || typeof XLSX === 'undefined') return;
+            const wb = XLSX.utils.book_new();
+
+            const aoa = [
+                [lastProspectusData.titoloProspetto || 'Prospetto AI'],
+                [lastProspectusData.sottotitolo || ''],
+                [],
+                lastProspectusData.colonneTabella || [],
+                ...(lastProspectusData.righeTabella || []),
+                [],
+                ['Sintesi Esecutiva AI:', lastProspectusData.sintesiEsecutiva || '']
+            ];
+            if (lastProspectusData.anomalieSegnalate) {
+                aoa.push(['Anomalie Rilevate:', lastProspectusData.anomalieSegnalate]);
+            }
+
+            const ws = XLSX.utils.aoa_to_sheet(aoa);
+            XLSX.utils.book_append_sheet(wb, ws, 'Prospetto AI');
+
+            const safeName = (lastProspectusData.titoloProspetto || 'prospetto_ai').toLowerCase().replace(/[^a-z0-9]/g, '_');
+            XLSX.writeFile(wb, `${safeName}.xlsx`);
+            showToast('Prospetto esportato in Excel (.xlsx)!');
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        function showToast(msg, type = 'success') {
+            const toast = document.getElementById('toast');
+            const icon = document.getElementById('toast-icon');
+            document.getElementById('toast-message').textContent = msg;
+            icon.className = type === 'error' ? 'text-rose-400' : 'text-emerald-400';
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(() => toast.classList.add('translate-y-20', 'opacity-0'), 3000);
+        }
+    </script>
+</body>
+</html>
